@@ -29,6 +29,7 @@
 #include "strconstants.h"
 #include "transactiondialog.h"
 #include "multiselectiondialog.h"
+#include "searchlineedit.h"
 #include <iostream>
 #include <cassert>
 
@@ -48,7 +49,7 @@ void MainWindow::changeTransactionActionsState()
   ui->actionCancel->setEnabled(state);
   ui->actionSyncPackages->setEnabled(!state);
 
-  if(m_hasMirrorCheck) m_actionMirrorCheck->setEnabled(!state);
+  if(m_hasMirrorCheck) m_actionMenuMirrorCheck->setEnabled(!state);
   if(m_hasAURTool) m_actionSwitchToAURTool->setEnabled(!state);
 
   if (state == false && m_outdatedStringList->count() > 0)
@@ -890,7 +891,6 @@ void MainWindow::doSystemUpgrade(SystemUpgradeOptions systemUpgradeOptions)
     if (systemUpgradeOptions == ectn_NOCONFIRM_OPT)
     {
       prepareSystemUpgrade();
-
       m_commandExecuting = ectn_SYSTEM_UPGRADE;
       m_pacmanExec->doSystemUpgrade();
       m_commandQueued = ectn_NONE;
@@ -898,7 +898,6 @@ void MainWindow::doSystemUpgrade(SystemUpgradeOptions systemUpgradeOptions)
     else
     {
       //Let's build the system upgrade transaction dialog...
-      totalDownloadSize = totalDownloadSize; // / 1024;
       QString ds = Package::kbytesToSize(totalDownloadSize);
 
       TransactionDialog question(this);
@@ -981,7 +980,7 @@ void MainWindow::doRemoveAndInstall()
 
   if (hasPartialUpgrade(pkgsToInstall)) return;
 
-  totalDownloadSize = totalDownloadSize; // / 1024;
+  //totalDownloadSize = totalDownloadSize / 1024;
   QString ds = Package::kbytesToSize(totalDownloadSize);
 
   if (installList.count() == 0)
@@ -1195,12 +1194,12 @@ void MainWindow::doInstallAURPackage()
     }
     if (package->repository != StrConstants::getForeignRepositoryName()) {
       std::cerr << "Octopi could not install selection using " <<
-                   StrConstants::getForeignRepositoryToolName().toLatin1().data() << std::endl;
+                   Package::getForeignRepositoryToolName().toLatin1().data() << std::endl;
       return;
     }
 
-    if (StrConstants::getForeignRepositoryToolName() != "pacaur" &&
-        StrConstants::getForeignRepositoryToolName() != "kcp")
+    if (Package::getForeignRepositoryToolName() != "pacaur" &&
+        Package::getForeignRepositoryToolName() != "kcp")
       listOfTargets += StrConstants::getForeignRepositoryTargetPrefix() + package->name + " ";
     else
       listOfTargets += package->name + " ";
@@ -1208,7 +1207,7 @@ void MainWindow::doInstallAURPackage()
 
   if (listOfTargets.isEmpty()) {
     std::cerr << "Octopi could not install selection using " <<
-                 StrConstants::getForeignRepositoryToolName().toLatin1().data() << std::endl;
+                 Package::getForeignRepositoryToolName().toLatin1().data() << std::endl;
     return;
   }
 
@@ -1343,7 +1342,7 @@ void MainWindow::doInstall()
 
   if (hasPartialUpgrade(pkgsToInstall)) return;
 
-  totalDownloadSize = totalDownloadSize; // / 1024;
+  //totalDownloadSize = totalDownloadSize / 1024;
   QString ds = Package::kbytesToSize(totalDownloadSize);
 
   if (list.count() == 0)
@@ -1537,7 +1536,7 @@ void MainWindow::toggleTransactionActions(const bool value)
     ui->actionCommit->setEnabled(true);
     ui->actionCancel->setEnabled(true);
 
-    if(m_hasMirrorCheck) m_actionMirrorCheck->setEnabled(false);
+    if(m_hasMirrorCheck) m_actionMenuMirrorCheck->setEnabled(false);
     if(m_hasAURTool) m_actionSwitchToAURTool->setEnabled(false);
 
     ui->actionSyncPackages->setEnabled(false);
@@ -1548,7 +1547,7 @@ void MainWindow::toggleTransactionActions(const bool value)
     ui->actionCommit->setEnabled(false);
     ui->actionCancel->setEnabled(false);
 
-    if(m_hasMirrorCheck) m_actionMirrorCheck->setEnabled(true);
+    if(m_hasMirrorCheck) m_actionMenuMirrorCheck->setEnabled(true);
     if(m_hasAURTool) m_actionSwitchToAURTool->setEnabled(true);
 
     ui->actionSyncPackages->setEnabled(true);
@@ -1560,7 +1559,7 @@ void MainWindow::toggleTransactionActions(const bool value)
     ui->actionCommit->setEnabled(false); //CHANGED
     ui->actionCancel->setEnabled(false); //CHANGED
 
-    if(m_hasMirrorCheck) m_actionMirrorCheck->setEnabled(false);
+    if(m_hasMirrorCheck) m_actionMenuMirrorCheck->setEnabled(false);
     if(m_hasAURTool) m_actionSwitchToAURTool->setEnabled(false);
 
     ui->actionSyncPackages->setEnabled(false);
@@ -1586,6 +1585,7 @@ void MainWindow::toggleTransactionActions(const bool value)
   ui->actionGetNews->setEnabled(value);  
   ui->actionInstallLocalPackage->setEnabled(value);
   ui->actionOpenRootTerminal->setEnabled(value);
+  m_actionMenuOptions->setEnabled(value);
   ui->actionHelpUsage->setEnabled(value);
   ui->actionHelpAbout->setEnabled(value);
   ui->actionExit->setEnabled(value);
@@ -1600,10 +1600,10 @@ void MainWindow::toggleSystemActions(const bool value)
 
   if(m_hasMirrorCheck)
   {
-    m_actionMirrorCheck->setEnabled(value);
+    m_actionMenuMirrorCheck->setEnabled(value);
   }
 
-  if (isAURGroupSelected() && StrConstants::getForeignRepositoryToolName() == "kcp")
+  if (isAURGroupSelected() && Package::getForeignRepositoryToolName() == "kcp")
   {
     ui->actionSyncPackages->setEnabled(true);
   }
@@ -1612,8 +1612,9 @@ void MainWindow::toggleSystemActions(const bool value)
     ui->actionSyncPackages->setEnabled(value);
   }
 
-  ui->actionInstallLocalPackage->setEnabled(value);
+  m_actionMenuOptions->setEnabled(value);
 
+  ui->actionInstallLocalPackage->setEnabled(value);
   ui->actionGetNews->setEnabled(value);
 
   if (value == true && m_outdatedStringList->count() > 0)
@@ -1666,7 +1667,6 @@ void MainWindow::pacmanProcessFinished(int exitCode, QProcess::ExitStatus exitSt
 {
   bool bRefreshGroups = true;
   m_progressWidget->close();
-
   ui->twProperties->setTabText(ctn_TABINDEX_OUTPUT, StrConstants::getTabOutputName());
 
   //mate-terminal is returning code 255 sometimes...
@@ -1706,6 +1706,9 @@ void MainWindow::pacmanProcessFinished(int exitCode, QProcess::ExitStatus exitSt
       //After the command, we can refresh the package list, so any change can be seem.
       if (m_commandExecuting == ectn_SYNC_DATABASE)
       {
+        //Sets NOW as the last sync time value
+        SettingsManager::setLastSyncDbTime(QDateTime::currentDateTime());
+
         //Retrieves the RSS News from respective Distro site...
         refreshDistroNews(true, false);
 
@@ -1719,7 +1722,7 @@ void MainWindow::pacmanProcessFinished(int exitCode, QProcess::ExitStatus exitSt
           {
             metaBuildPackageList();
           }
-          else if (StrConstants::getForeignRepositoryToolName() == "kcp")
+          else if (Package::getForeignRepositoryToolName() == "kcp")
           {
             metaBuildPackageList();
             delete m_pacmanExec;
@@ -1790,7 +1793,8 @@ void MainWindow::pacmanProcessFinished(int exitCode, QProcess::ExitStatus exitSt
 
   m_commandExecuting = ectn_NONE;
 
-  if (isPackageTreeViewVisible() && !ui->tvPackages->hasFocus()) ui->tvPackages->setFocus();
+  //if (isPackageTreeViewVisible() && !ui->tvPackages->hasFocus()) ui->tvPackages->setFocus();
+  if (isPackageTreeViewVisible() && !m_leFilterPackage->hasFocus()) m_leFilterPackage->setFocus();
 }
 
 /*

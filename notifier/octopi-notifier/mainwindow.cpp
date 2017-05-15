@@ -19,13 +19,13 @@
 */
 
 #include "mainwindow.h"
-#include "setupdialog.h"
 #include "outputdialog.h"
 #include "../pacmanhelper/pacmanhelperclient.h"
 #include "../../src/strconstants.h"
 #include "../../src/uihelper.h"
 #include "../../src/package.h"
 #include "../../src/transactiondialog.h"
+#include "../../src/optionsdialog.h"
 
 #include <QTimer>
 #include <QSystemTrayIcon>
@@ -50,9 +50,8 @@ MainWindow::MainWindow(QWidget *parent) :
     QMainWindow(parent)
 {
   m_transactionDialog = nullptr;
-
   m_debugInfo = false;
-  m_setupDialog = nullptr;
+  m_optionsDialog = nullptr;
   m_pacmanDatabaseSystemWatcher =
             new QFileSystemWatcher(QStringList() << ctn_PACMAN_DATABASE_DIR, this);
 
@@ -107,9 +106,9 @@ void MainWindow::initSystemTrayIcon()
   m_actionOctopi->setText("Octopi...");
   connect(m_actionOctopi, SIGNAL(triggered()), this, SLOT(startOctopi()));
 
-  m_actionSetInterval = new QAction(this);
-  m_actionSetInterval->setText(StrConstants::getSetInterval());
-  connect(m_actionSetInterval, SIGNAL(triggered()), this, SLOT(showConfigDialog()));
+  m_actionOptions = new QAction(this);
+  m_actionOptions->setText(StrConstants::getOptions());
+  connect(m_actionOptions, SIGNAL(triggered()), this, SLOT(showConfigDialog()));
 
   m_actionSyncDatabase = new QAction(this);
   m_actionSyncDatabase->setIconVisibleInMenu(true);
@@ -128,9 +127,10 @@ void MainWindow::initSystemTrayIcon()
   if (UnixCommand::hasTheExecutable("octopi"))
     m_systemTrayIconMenu->addAction(m_actionOctopi);
 
-  m_systemTrayIconMenu->addAction(m_actionSetInterval);
   m_systemTrayIconMenu->addAction(m_actionSyncDatabase);
   m_systemTrayIconMenu->addAction(m_actionSystemUpgrade);
+  m_systemTrayIconMenu->addSeparator();
+  m_systemTrayIconMenu->addAction(m_actionOptions);
   m_systemTrayIconMenu->addSeparator();
   m_systemTrayIconMenu->addAction(m_actionAbout);
   m_systemTrayIconMenu->addAction(m_actionExit);
@@ -322,7 +322,6 @@ void MainWindow::doSystemUpgrade()
   }
   list.remove(list.size()-1, 1);
 
-  totalDownloadSize = totalDownloadSize / 1024;
   QString ds = Package::kbytesToSize(totalDownloadSize);
   m_transactionDialog = new TransactionDialog(this);
 
@@ -424,7 +423,8 @@ void MainWindow::toggleEnableInterface(bool state)
 {
   m_actionOctopi->setEnabled(state);
   m_actionSyncDatabase->setEnabled(state);
-  m_actionSetInterval->setEnabled(state);
+  m_actionOptions->setEnabled(state);
+  m_actionSystemUpgrade->setEnabled(state);
   m_actionExit->setEnabled(state);
 }
 
@@ -463,7 +463,6 @@ void MainWindow::afterPacmanHelperSyncDatabase()
                                         notification, m_systemTrayIcon->iconName());
         #else
           m_systemTrayIcon->setToolTip(notification);
-          //if (!UnixCommand::isAppRunning("spun", true)) sendNotification(notification);
         #endif
       }
       else if (m_numberOfOutdatedPackages > 1)
@@ -476,7 +475,6 @@ void MainWindow::afterPacmanHelperSyncDatabase()
                                         notification, m_systemTrayIcon->iconName());
         #else
           m_systemTrayIcon->setToolTip(notification);
-          //if (!UnixCommand::isAppRunning("spun", true)) sendNotification(notification);
         #endif
       }
     }
@@ -495,7 +493,6 @@ void MainWindow::afterPacmanHelperSyncDatabase()
                                       notification, m_systemTrayIcon->iconName());
       #else
         m_systemTrayIcon->setToolTip(notification);
-        //if (!UnixCommand::isAppRunning("spun", true)) sendNotification(notification);
       #endif
     }
     else if (numberOfOutdatedPackages > 1)
@@ -508,7 +505,6 @@ void MainWindow::afterPacmanHelperSyncDatabase()
                                       notification, m_systemTrayIcon->iconName());
       #else
         m_systemTrayIcon->setToolTip(notification);
-        //if (!UnixCommand::isAppRunning("spun", true)) sendNotification(notification);
       #endif
     }
   }
@@ -526,7 +522,7 @@ void MainWindow::syncDatabase()
   if (m_debugInfo)
     qDebug() << now.currentTime().toString("HH:mm").toLatin1().data() <<  ": At syncDatabase()...";
   toggleEnableInterface(false);
-  m_icon = IconHelper::getIconOctopiTransparent();
+  m_icon = IconHelper::getIconOctopiBusy();
 
 #ifdef KSTATUS
   m_systemTrayIcon->setIconByPixmap(m_icon);
@@ -556,6 +552,7 @@ void MainWindow::syncDatabase()
   }
 
   m_pacmanHelperClient->syncdb();
+  SettingsManager::setLastSyncDbTime(QDateTime::currentDateTime());
 }
 
 /*
@@ -584,7 +581,8 @@ void MainWindow::refreshAppIcon()
   if (m_debugInfo)
     qDebug() << "At refreshAppIcon()...";
   m_outdatedStringList = Package::getOutdatedStringList();
-  bool hasAURTool = UnixCommand::hasTheExecutable(StrConstants::getForeignRepositoryToolName());
+
+  bool hasAURTool = UnixCommand::hasTheExecutable(Package::getForeignRepositoryToolName());
 
   if (hasAURTool)
   {
@@ -670,6 +668,7 @@ void MainWindow::refreshAppIcon()
 
     if (m_debugInfo)
       qDebug() << "Got a RED icon!";
+
     m_icon = IconHelper::getIconOctopiRed();
 
 
@@ -775,6 +774,7 @@ void MainWindow::exitNotifier()
 {
   if (m_debugInfo)
     qDebug() << "At exitNotifier()...";
+
   qApp->quit();
 }
 
@@ -829,15 +829,23 @@ void MainWindow::runOctopi(ExecOpt execOptions)
  */
 void MainWindow::showConfigDialog()
 {
-  if (m_setupDialog == nullptr)
+  if (m_optionsDialog == nullptr)
   {
-    m_setupDialog = new SetupDialog(this);
-#if QT_VERSION >= 0x050000
-    utils::positionWindowAtScreenCenter(m_setupDialog);
-#endif
-    m_setupDialog->exec();
+    m_optionsDialog = new OptionsDialog(this);
 
-    delete m_setupDialog;
-    m_setupDialog = nullptr;
+#if QT_VERSION >= 0x050000
+    utils::positionWindowAtScreenCenter(m_optionsDialog);
+#endif
+
+    m_optionsDialog->exec();
+
+    Options::result res = m_optionsDialog->result();
+    if (res & Options::ectn_ICON)
+    {
+      refreshAppIcon();
+    }
+
+    delete m_optionsDialog;
+    m_optionsDialog = nullptr;
   }
 }

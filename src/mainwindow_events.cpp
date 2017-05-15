@@ -42,10 +42,6 @@
 #include <QClipboard>
 #include <QtConcurrent/QtConcurrentRun>
 
-#if QT_VERSION >= 0x050300
-  #include "terminalselectordialog.h"
-#endif
-
 /*
  * Before we close the application, let's confirm if there is a pending transaction...
  */
@@ -306,26 +302,15 @@ void MainWindow::keyPressEvent(QKeyEvent* ke)
     gistSysInfo();
   }
 
-  #if QT_VERSION >= 0x050300
-  else if(ke->key() == Qt::Key_T && ke->modifiers() == (Qt::ShiftModifier|Qt::ControlModifier)
+  /*else if(ke->key() == Qt::Key_T && ke->modifiers() == (Qt::ShiftModifier|Qt::ControlModifier)
           && m_initializationCompleted)
   {
     if (m_commandExecuting != ectn_NONE) return;
 
-    QStringList terminals = Terminal::getListOfAvailableTerminals();
-
-    if (terminals.count() > 2)
-    {
-      int index = terminals.indexOf(SettingsManager::getTerminal());
-      int newIndex = selectTerminal(index);
-
-      if (index != newIndex)
-      {
-        SettingsManager::setTerminal(terminals.at(newIndex));
-      }
-    }
-  }
-  #endif
+    OptionsDialog *od = new OptionsDialog(this);
+    int res = od->exec();
+    if (res) refreshAppIcon();
+  }*/
 
   else ke->ignore();
 }
@@ -333,8 +318,7 @@ void MainWindow::keyPressEvent(QKeyEvent* ke)
 /*
  * Calls TerminalSelectorDialog to let user chooses which terminal to use with Octopi
  */
-#if QT_VERSION >= 0x050300
-int MainWindow::selectTerminal(const int initialTerminalIndex)
+/*int MainWindow::selectTerminal(const int initialTerminalIndex)
 {
   int result = initialTerminalIndex;
   std::unique_ptr<TerminalSelectorDialog> d(
@@ -352,8 +336,7 @@ int MainWindow::selectTerminal(const int initialTerminalIndex)
   }
 
   return result;
-}
-#endif
+}*/
 
 /*
  * This Event method is called whenever the user releases a key

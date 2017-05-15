@@ -6,7 +6,7 @@ pkgdesc="This is Octopi, a powerful Pacman frontend using Qt libs"
 url="https://octopiproject.wordpress.com/"
 arch=('i686' 'x86_64')
 license=('GPL2')
-depends=('qt5-quickcontrols' 'pacman' 'pkgfile' 'knotifications' 'alpm_octopi_utils' 'xterm')
+depends=('pacman' 'pkgfile' 'knotifications' 'alpm_octopi_utils' 'xterm')
 optdepends=('kdesu: for KDE'
             'gksu: for XFCE, Gnome, LXDE, Cinnamon'
             'gnome-keyring: for password management'
@@ -21,10 +21,8 @@ prepare() {
    cd ${pkgname}-${pkgver}
 
    # enable the kstatus switch, disable if you wish to build without Plasma/knotifications support
-   sed -e "s|# DEFINES += KSTATUS| DEFINES += KSTATUS|" -i notifier/octopi-notifier/octopi-notifier.pro
-   # enable alpm backend, disable if you wish to build without alpm_octopi_utils
-   sed -e "s|#ALPM_BACKEND|ALPM_BACKEND|" -i octopi.pro
-   
+   sed -e "s|DEFINES += ALPM_BACKEND #KSTATUS|DEFINES += ALPM_BACKEND KSTATUS|" -i notifier/octopi-notifier/octopi-notifier.pro
+      
    cp resources/images/octopi_green.png resources/images/octopi.png
 }
          

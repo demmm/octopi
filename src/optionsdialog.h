@@ -18,35 +18,56 @@
 *
 */
 
-#ifndef CONFIGDIALOG_H
-#define CONFIGDIALOG_H
+#ifndef OPTIONSDIALOG_H
+#define OPTIONSDIALOG_H
 
+#include "ui_optionsdialog.h"
 #include <QDialog>
 
-namespace Ui {
-class SetupDialog;
+namespace Options
+{
+  enum { ectn_BACKEND=0x1, ectn_ICON=0x2 }; typedef unsigned long result;
 }
 
-class SetupDialog : public QDialog
+class OptionsDialog : public QDialog, public Ui_OptionsDialog
 {
   Q_OBJECT
 
-public:
-  explicit SetupDialog(QWidget *parent = 0);
-  ~SetupDialog();
+private:
+  bool m_once;
+  bool m_iconHasChanged;
+  bool m_backendHasChanged;
+  bool m_calledByOctopi;
 
-public slots:
+  QString m_redIconPath;
+  QString m_yellowIconPath;
+  QString m_greenIconPath;
+  QString m_busyIconPath;
+
+  void initialize();
+  void initButtonBox();
+  void initBackendTab();
+  void initIconTab();
+  void initSynchronizationTab();
+  void initTerminalTab();
+
+protected:
+  virtual void paintEvent(QPaintEvent *);
   virtual void accept();
 
-private:
-  Ui::SetupDialog *ui;
-  void init();
-  void saveChanges();
+public:
+  explicit OptionsDialog(QWidget *parent = 0);
 
 private slots:
+  void defaultIconChecked(bool checked);
+  void selRedIconPath();
+  void selYellowIconPath();
+  void selGreenIconPath();
+  void selBusyIconPath();
+  void currentTabChanged(int tabIndex);
   void selectOnceADay();
   void selectOnceADayAt();
   void selectOnceEvery();
 };
 
-#endif // CONFIGDIALOG_H
+#endif // OptionsDialog_H

@@ -30,6 +30,7 @@
 #include "utils.h"
 #include "globals.h"
 #include <iostream>
+#include "optionsdialog.h"
 
 #include <QStandardItemModel>
 #include <QString>
@@ -53,7 +54,7 @@ MainWindow::MainWindow(QWidget *parent) :
   QMainWindow(parent), ui(new Ui::MainWindow), m_packageModel(new PackageModel(m_packageRepo))
 {
   m_hasAURTool =
-      UnixCommand::hasTheExecutable(StrConstants::getForeignRepositoryToolName()) && !UnixCommand::isRootRunning();
+      UnixCommand::hasTheExecutable(Package::getForeignRepositoryToolName()) && !UnixCommand::isRootRunning();
 
   m_packageRepo.registerDependency(*m_packageModel);
   m_foundFilesInPkgFileList = new QList<QModelIndex>();
@@ -176,6 +177,30 @@ void MainWindow::show()
 void MainWindow::onPacmanDatabaseChanged()
 {
   if (m_initializationCompleted) m_refreshPackageLists = true;
+}
+
+/*
+ * Whenever we call Options menu
+ */
+void MainWindow::onOptions()
+{
+  if (m_commandExecuting != ectn_NONE) return;
+
+  OptionsDialog *od = new OptionsDialog(this);
+  od->exec();
+  Options::result res = od->result();
+
+  delete od;
+
+  if (res & Options::ectn_ICON)
+  {
+    refreshAppIcon();
+  }
+
+  if (res & Options::ectn_BACKEND)
+  {
+    AURToolSelected();
+  }
 }
 
 /*
@@ -1362,6 +1387,7 @@ void MainWindow::openTerminal()
  */
 void MainWindow::openDirectory(){
   QString dir = getSelectedDirectory();
+
   if (!dir.isEmpty())
   {
     WMHelper::openDirectory(dir);

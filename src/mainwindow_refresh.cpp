@@ -74,22 +74,19 @@ void MainWindow::refreshMenuTools()
   static bool connectorRepo=false;
   static bool connectorCleaner=false;
   static bool connectorGist=false;
-  int availableTools=0;
 
   if (UnixCommand::hasTheExecutable("mirror-check"))
   {
-    availableTools++;
     ui->menuTools->menuAction()->setVisible(true);
-    if (!m_actionMirrorCheck->toolTip().contains("("))
-      m_actionMirrorCheck->setToolTip(m_actionMirrorCheck->toolTip() + "  (" + m_actionMirrorCheck->shortcut().toString() + ")" );
-    m_actionMirrorCheck->setVisible(true);
+    if (!m_actionMenuMirrorCheck->toolTip().contains("("))
+      m_actionMenuMirrorCheck->setToolTip(m_actionMenuMirrorCheck->toolTip() + "  (" + m_actionMenuMirrorCheck->shortcut().toString() + ")" );
+    m_actionMenuMirrorCheck->setVisible(true);
   }
   else
-    m_actionMirrorCheck->setVisible(false);
+    m_actionMenuMirrorCheck->setVisible(false);
 
   if(UnixCommand::hasTheExecutable("plv"))
   {
-    availableTools++;
     ui->menuTools->menuAction()->setVisible(true);
     ui->actionPacmanLogViewer->setVisible(true);
     ui->actionPacmanLogViewer->setIcon(QIcon::fromTheme("plv"));
@@ -105,7 +102,6 @@ void MainWindow::refreshMenuTools()
 
   if(UnixCommand::hasTheExecutable("octopi-repoeditor") && UnixCommand::getLinuxDistro() != ectn_KAOS)
   {
-    availableTools++;
     ui->menuTools->menuAction()->setVisible(true);
     ui->actionRepositoryEditor->setVisible(true);
 
@@ -120,7 +116,6 @@ void MainWindow::refreshMenuTools()
 
   if(UnixCommand::hasTheExecutable("octopi-cachecleaner"))
   {
-    availableTools++;
     ui->menuTools->menuAction()->setVisible(true);
     ui->actionCacheCleaner->setVisible(true);
 
@@ -139,9 +134,8 @@ void MainWindow::refreshMenuTools()
     if (ui->menuTools->actions().indexOf(m_actionSysInfo) == -1)
     {
       ui->menuTools->addSeparator();
-      m_actionSysInfo->setText("SysInfo -> gist.github.com");
+      m_actionSysInfo->setText("SysInfo → gist.github.com");
       ui->menuTools->addAction(m_actionSysInfo);
-      availableTools++;
 
       if (!connectorGist)
       {
@@ -161,13 +155,8 @@ void MainWindow::refreshMenuTools()
           ui->menuTools->removeAction(act);
         }
       }
-
-      availableTools--;
     }
   }
-
-  if (availableTools == 0)
-    ui->menuTools->menuAction()->setVisible(false);
 
   foreach (QAction * act,  ui->menuBar->actions())
   {
@@ -903,6 +892,7 @@ void MainWindow::postBuildPackageList()
     ui->twGroups->setFocus();
     m_groupWidgetNeedsFocus = false;
   }
+  else m_leFilterPackage->setFocus();
 }
 
 /*
@@ -1048,9 +1038,9 @@ void MainWindow::showToolButtonAUR()
 
   m_outdatedAURPackagesNameVersion = &g_fwOutdatedAURPackages.result()->content;
 
-  if(m_outdatedAURStringList->count() > 0)
+  if(m_outdatedAURPackagesNameVersion->count() > 0)
   {
-    if (m_outdatedAURStringList->count() == 1)
+    if (m_outdatedAURPackagesNameVersion->count() == 1)
     {
       m_toolButtonAUR->setText("(1)");
       m_toolButtonAUR->setToolTip(StrConstants::getOneNewUpdate());
@@ -1084,7 +1074,7 @@ void MainWindow::showToolButtonAUR()
 void MainWindow::refreshToolBar()
 {
   m_hasAURTool =
-      UnixCommand::hasTheExecutable(StrConstants::getForeignRepositoryToolName()) && !UnixCommand::isRootRunning();
+      UnixCommand::hasTheExecutable(Package::getForeignRepositoryToolName()) && !UnixCommand::isRootRunning();
 
   if (m_hasAURTool)
   {
@@ -1276,7 +1266,7 @@ void MainWindow::refreshTabInfo(bool clearContents, bool neverQuit)
     {
       PackageInfoData kcp;
 
-      if (StrConstants::getForeignRepositoryToolName() == "kcp")
+      if (Package::getForeignRepositoryToolName() == "kcp")
       {
         QEventLoop el;
         QFuture<PackageInfoData> f;
@@ -1296,15 +1286,15 @@ void MainWindow::refreshTabInfo(bool clearContents, bool neverQuit)
       html += "<a id=\"" + anchorBegin + "\"></a>";            
       html += "<h2>" + pkgName + "</h2>";
 
-      if (StrConstants::getForeignRepositoryToolName() != "kcp")
+      if (Package::getForeignRepositoryToolName() != "kcp")
       {
         html += "<a style=\"font-size:16px;\">" + pkgDescription + "</a>";
         html += "<table border=\"0\">";
         html += "<tr><th width=\"20%\"></th><th width=\"80%\"></th></tr>";
         html += "<tr><td>" + version + "</td><td>" + package->version + "</td></tr>";        
 
-        if (StrConstants::getForeignRepositoryToolName() == "yaourt" ||
-            StrConstants::getForeignRepositoryToolName() == "pacaur")
+        if (Package::getForeignRepositoryToolName() == "yaourt" ||
+            Package::getForeignRepositoryToolName() == "pacaur")
         {
           QString url = Package::getAURUrl(pkgName);
           if (!url.isEmpty() && !url.contains("(null)"))
@@ -1313,7 +1303,7 @@ void MainWindow::refreshTabInfo(bool clearContents, bool neverQuit)
           }
         }
       }
-      else if (StrConstants::getForeignRepositoryToolName() == "kcp")
+      else if (Package::getForeignRepositoryToolName() == "kcp")
       {
         html += "<a style=\"font-size:16px;\">" + kcp.description + "</a>";
         html += "<table border=\"0\">";
@@ -1568,8 +1558,6 @@ void MainWindow::refreshTabFiles(bool clearContents, bool neverQuit)
 
       counter++;
       m_progressWidget->setValue(counter);
-      qApp->processEvents();
-
       lastItem = item;
       first = false;
     }

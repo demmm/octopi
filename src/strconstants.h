@@ -77,28 +77,6 @@ public:
     return QLatin1String( "aur" );
   }
 
-  static QString getForeignRepositoryToolName()
-  {
-    static bool first=true;
-    static QString ret;
-
-    if (first)
-    {
-      if( UnixCommand::getLinuxDistro() == ectn_CHAKRA )
-        ret = QLatin1String( "chaser" );
-      else if (UnixCommand::getLinuxDistro() == ectn_KAOS)
-        ret = QLatin1String( "kcp" );
-      else if (UnixCommand::hasTheExecutable("pacaur"))
-        ret = QLatin1String( "pacaur" );
-      else
-        ret = QLatin1String( "yaourt" );
-
-      first = false;
-    }
-
-    return ret;
-  }
-
   static QString getForeignRepositoryGroupName()
   {
     if( UnixCommand::getLinuxDistro() == ectn_CHAKRA )
@@ -155,6 +133,10 @@ public:
     return QObject::tr("Parabola GNU/Linux-libre news");
   }
 
+  static QString getError(){
+    return QObject::tr("Error");
+  }
+
   static QString getNewsErrorMessage(){
     return QObject::tr("No news could be found! Press Ctrl+G to download the latest news.");
   }
@@ -172,7 +154,7 @@ public:
   }
 
   static QString getForeignToolGroup(){
-    QString tool = getForeignRepositoryToolName();
+    QString tool = Package::getForeignRepositoryToolName();
     tool[0] = tool[0].toUpper();
     tool = "<" + tool + ">";
 
@@ -185,6 +167,10 @@ public:
 
   static QString getHelpAbout(){
     return QObject::tr("About");
+  }
+
+  static QString getOptions(){
+    return QObject::tr("Options");
   }
 
   static QString getName(){
@@ -545,6 +531,10 @@ public:
     return QObject::tr("You'll need to install a su frontend like gksu or kdesu.");
   }
 
+  static QString getErrorIconPathInfoIncomplete(){
+    return QObject::tr("Icon path information is incomplete.");
+  }
+
   static QString getErrorRunningWithRoot(){
     return QObject::tr("You can not run Octopi with administrator's credentials.");
   }
@@ -611,7 +601,7 @@ public:
   }
 
   static QString getUseAURTool(){
-    return QObject::tr("Use \"%1\" tool").arg(getForeignRepositoryToolName());
+    return QObject::tr("Use \"%1\" tool").arg(Package::getForeignRepositoryToolName());
   }
 
   static QString getCopyFullPath(){

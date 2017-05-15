@@ -184,8 +184,9 @@ private:
   QAction *m_actionInstallPacmanUpdates;
   QAction *m_actionInstallAURUpdates;
   QAction *m_actionShowGroups;
-  QAction *m_actionMirrorCheck;
+  QAction *m_actionMenuMirrorCheck;
   QAction *m_actionMenuRepository;
+  QAction *m_actionMenuOptions;
   QAction *m_actionRepositoryAll;
   QAction *m_actionEditOctopiConf;
   QAction *m_actionCopyFullPath;
@@ -220,7 +221,6 @@ private:
   void savePackageColumnWidths();
 
   void initAppIcon();
-  void refreshAppIcon();
   void refreshMenuTools();
   void refreshGroupsWidget();
   void refreshStatusBar();
@@ -421,6 +421,7 @@ private slots:
   void postRefreshDistroNews();
 
   void onPacmanDatabaseChanged();
+  void onOptions();
   void onHelpUsage();
   void onHelpAbout();
   void onPressDelete();
@@ -445,6 +446,7 @@ private slots:
   void launchRepoEditor();
   void launchCacheCleaner();
   void gistSysInfo();
+  void refreshAppIcon();
 
 public slots:
   void doSystemUpgrade(SystemUpgradeOptions sysUpgradeOption = ectn_NO_OPT);
