@@ -237,7 +237,7 @@ QByteArray execCommandInAnotherThread(QString cmd)
 }
 
 /*
- * Generates SysInfo file and paste it to ptpb site
+ * Generates SysInfo file and paste it to a pastebin site
  *
  * Returns a clickable URL
  */
@@ -252,9 +252,9 @@ QString generateSysInfo(QByteArray contents)
   tempFile->flush();
   tempFile->close();
 
-  //Assign collected logs (contents) to a 24h ptpb paste lifetime
-  QString ptpb = UnixCommand::getCommandOutput("curl -F sunset=86400 -F c=@- https://ptpb.pw/", tempFile->fileName());
+  //Assign collected logs (contents) to a 24h pastebin paste lifetime
+  QString paste = UnixCommand::getCommandOutput("curl -F 'f:1=' ix.io", tempFile->fileName());
   //QString ptpb = UnixCommand::getCommandOutput("curl -F sunset=10 -F c=@- https://ptpb.pw/", tempFile->fileName());
-  ptpb.replace("\n", "\n<br>");
-  return ptpb;
+  paste.replace("\n", "\n<br>");
+  return paste;
 }

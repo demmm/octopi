@@ -73,7 +73,7 @@ void MainWindow::refreshMenuTools()
   static bool connectorPlv=false;
   static bool connectorRepo=false;
   static bool connectorCleaner=false;
-  static bool connectorPtpb=false;
+  static bool connectorPaste=false;
 
   if (UnixCommand::hasTheExecutable("mirror-check"))
   {
@@ -134,13 +134,13 @@ void MainWindow::refreshMenuTools()
     if (ui->menuTools->actions().indexOf(m_actionSysInfo) == -1)
     {
       ui->menuTools->addSeparator();
-      m_actionSysInfo->setText("SysInfo → https://ptpb.pw");
+      m_actionSysInfo->setText("SysInfo → http://ix.io");
       ui->menuTools->addAction(m_actionSysInfo);
 
-      if (!connectorPtpb)
+      if (!connectorPaste)
       {
-        connect(m_actionSysInfo, SIGNAL(triggered()), this, SLOT(ptpbSysInfo()));
-        connectorPtpb=true;
+        connect(m_actionSysInfo, SIGNAL(triggered()), this, SLOT(pasteSysInfo()));
+        connectorPaste=true;
       }
     }
   }

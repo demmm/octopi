@@ -1719,9 +1719,9 @@ void MainWindow::launchCacheCleaner()
 }
 
 /*
- * Makes a ptpb with a bunch of system file contents.
+ * Makes a pastebin with a bunch of system file contents.
  */
-void MainWindow::ptpbSysInfo()
+void MainWindow::pasteSysInfo()
 {
   if (!UnixCommand::hasTheExecutable("curl") ||
       m_commandExecuting != ectn_NONE) return;
@@ -1730,7 +1730,7 @@ void MainWindow::ptpbSysInfo()
 
   //Asks user if he/she is sure about doing this
   int res = QMessageBox::question(this, StrConstants::getConfirmation(),
-                                  StrConstants::getDoYouAgreeToUsePtpb(),
+                                  StrConstants::getDoYouAgreeToUsePaste(),
                                   QMessageBox::Yes | QMessageBox::No,
                                   QMessageBox::No);
   if (res == QMessageBox::No) return;
@@ -1951,7 +1951,7 @@ void MainWindow::ptpbSysInfo()
 
   if (!uuid.isEmpty())
   {
-    result += "<br>delete command: curl -X DELETE https://ptpb.pw/" + uuid;
+    result += "<br>delete command: curl -n -X DELETE http://ix.io/" + uuid;
   }
 
   writeToTabOutput("<br>" + result + "<br>");

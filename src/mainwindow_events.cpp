@@ -318,7 +318,7 @@ void MainWindow::keyPressEvent(QKeyEvent* ke)
   } 
   else if(ke->key() == Qt::Key_S && ke->modifiers() == (Qt::ShiftModifier|Qt::ControlModifier))
   {
-    ptpbSysInfo();
+    pasteSysInfo();
   }
 
   else ke->ignore();

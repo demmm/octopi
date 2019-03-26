@@ -480,7 +480,7 @@ private slots:
   void launchPLV();
   void launchRepoEditor();
   void launchCacheCleaner();
-  void ptpbSysInfo();
+  void pasteSysInfo();
   void refreshAppIcon();
 
 public slots:

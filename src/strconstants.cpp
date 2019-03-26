@@ -555,13 +555,13 @@ QString StrConstants::getDoYouReallyWantToQuit(){
   return QObject::tr("Do you really want to quit?");
 }
 
-QString StrConstants::getDoYouAgreeToUsePtpb()
+QString StrConstants::getDoYouAgreeToUsePaste()
 {
   return QObject::tr("Do you agree to send the contents of:\n\n"
                      "\"/etc/lsb-release\", \"inxi -Fxz\", \"uname -a\", \"mhwd -li -d,\"\n"
                      "\"journalctl -b -p err\", \"cat /etc/pacman.conf\", \"pacman -Qm\"\n"
                      "and \"head --bytes=256K /var/log/pacman.log\"\n\n"
-                     "to \"https://ptpb.pw\" for a 24h paste period?\n");
+                     "to \"http://ix.io\" for a 24h paste period?\n");
 }
 
 QString StrConstants::getExecutingCommand(){
