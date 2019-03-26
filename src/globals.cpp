@@ -253,7 +253,7 @@ QString generateSysInfo(QByteArray contents)
   tempFile->close();
 
   //Assign collected logs (contents) to a 24h pastebin paste lifetime
-  QString paste = UnixCommand::getCommandOutput("curl -F 'f:1=' ix.io", tempFile->fileName());
+  QString paste = UnixCommand::getCommandOutput("curl -F 'f:1=<-' ix.io", tempFile->fileName());
   //QString ptpb = UnixCommand::getCommandOutput("curl -F sunset=10 -F c=@- https://ptpb.pw/", tempFile->fileName());
   paste.replace("\n", "\n<br>");
   return paste;
