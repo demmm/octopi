@@ -38,10 +38,9 @@
 #include <QProcess>
 #include <QTimer>
 #include <QTextBrowser>
-
-#if QT_VERSION >= 0x050000
 #include <QScreen>
-#endif
+#include <QRegularExpression>
+#include <QDebug>
 
 /*
  * The needed constructor
@@ -130,7 +129,7 @@ void utils::ProcessWrapper::onSingleShot()
 
     if (UnixCommand::getLinuxDistro() == ectn_KAOS)
     {
-      if (out.contains("kcp", Qt::CaseInsensitive))
+      if (out.contains(ctn_KCP_TOOL, Qt::CaseInsensitive))
       {
         pAux.start("ps -o pid -C kcp");
         pAux.waitForFinished(-1);
@@ -140,7 +139,6 @@ void utils::ProcessWrapper::onSingleShot()
         for (int d=1; d<slist.count(); d++)
         {
           int candidatePid2 = slist.at(d).trimmed().toInt();
-
           if (candidatePid < candidatePid2)
           {
             m_pidSH = candidatePid;
@@ -276,13 +274,12 @@ QList<QModelIndex> * utils::findFileInTreeView( const QString& name, const QStan
  */
 QString utils::retrieveDistroNews(bool searchForLatestNews)
 {
-  const QString ctn_ANTERGOS_RSS_URL = "http://antergos.com/category/news/feed/";
-  const QString ctn_ARCHBSD_RSS_URL = "http://archbsd.net/feeds/news/";
+  const QString ctn_ANTERGOS_RSS_URL = "https://antergos.com/feed/";
   const QString ctn_ARCH_LINUX_RSS_URL = "https://www.archlinux.org/feeds/news/";
-  const QString ctn_CHAKRA_RSS_URL = "https://chakralinux.org/news/index.php?/feeds/index.rss2";
+  const QString ctn_CHAKRA_RSS_URL = "https://community.chakralinux.org/c/news.rss";
+  const QString ctn_CONDRESOS_RSS_URL = "https://condresos.codelinsoft.it/index.php/blog?format=feed&amp;type=rss";
   const QString ctn_KAOS_RSS_URL = "https://kaosx.us/feed.xml";
-  const QString ctn_MANJARO_LINUX_RSS_URL = "https://manjaro.org/feed/";
-  //const QString ctn_MANJARO_LINUX_RSS_URL = "https://manjaro.github.io/feed.xml";
+  const QString ctn_MANJARO_LINUX_RSS_URL = "https://forum.manjaro.org/c/announcements.rss";
   const QString ctn_NETRUNNER_RSS_URL = "http://www.netrunner-os.com/feed/";
   const QString ctn_PARABOLA_RSS_URL = "https://www.parabola.nu/feeds/news/";
 
@@ -309,10 +306,6 @@ QString utils::retrieveDistroNews(bool searchForLatestNews)
     {
       curlCommand = curlCommand.arg(ctn_ANTERGOS_RSS_URL).arg(tmpRssPath);
     }
-    else if (distro == ectn_ARCHBSD)
-    {
-      curlCommand = curlCommand.arg(ctn_ARCHBSD_RSS_URL).arg(tmpRssPath);
-    }
     else if (distro == ectn_ARCHLINUX || distro == ectn_ARCHBANGLINUX || distro == ectn_MOOOSLINUX)
     {
       curlCommand = curlCommand.arg(ctn_ARCH_LINUX_RSS_URL).arg(tmpRssPath);
@@ -321,6 +314,11 @@ QString utils::retrieveDistroNews(bool searchForLatestNews)
     {
       curlCommand = "curl -k %1 -o %2";
       curlCommand = curlCommand.arg(ctn_CHAKRA_RSS_URL).arg(tmpRssPath);
+    }
+    else if (distro == ectn_CONDRESOS)
+    {
+      curlCommand = "curl -A \"Mozilla/5.0 (Windows NT 6.1; Win64; x64; rv:59.0) Gecko/20100101 Firefox/59.0\" -k \"%1\" -o %2";
+      curlCommand = curlCommand.arg(ctn_CONDRESOS_RSS_URL).arg(tmpRssPath);
     }
     else if (distro == ectn_KAOS)
     {
@@ -354,8 +352,20 @@ QString utils::retrieveDistroNews(bool searchForLatestNews)
         if (!fileRss.open(QIODevice::ReadOnly | QIODevice::Text)) res = "";
         QTextStream in2(&fileRss);
         contentsRss = in2.readAll();
-        fileRss.close();
 
+        if (distro == ectn_CONDRESOS)
+        {
+          //Let's remove <lastBuildDate>XYZ</lastBuildDate> text so our SHA1 test works as expected
+          //qDebug() << contentsRss;
+          contentsRss.replace(QRegularExpression("(\\t*)(\\n*)<lastBuildDate>(.*)</lastBuildDate>(\\t*)(\\n*)"), "");
+          fileRss.close();
+          fileRss.remove();
+          if (!fileRss.open(QIODevice::WriteOnly | QIODevice::Text)) res = "";
+          in2 << contentsRss;
+          in2.flush();
+        }
+
+        fileRss.close();
         res = contentsRss;
       }
       else
@@ -369,6 +379,19 @@ QString utils::retrieveDistroNews(bool searchForLatestNews)
         if (!fileTmpRss.open(QIODevice::ReadOnly | QIODevice::Text)) res = "";
         QTextStream in(&fileTmpRss);
         contentsTmpRss = in.readAll();
+
+        if (distro == ectn_CONDRESOS)
+        {
+          //Let's remove <lastBuildDate>XYZ</lastBuildDate> text so our SHA1 test works as expected
+          contentsTmpRss.replace(QRegularExpression("(\\t*)(\\n*)<lastBuildDate>(.*)</lastBuildDate>(\\t*)(\\n*)"), "");
+
+          fileTmpRss.close();
+          fileTmpRss.remove();
+          if (!fileTmpRss.open(QIODevice::WriteOnly | QIODevice::Text)) res = "";
+          in << contentsTmpRss;
+          in.flush();
+        }
+
         fileTmpRss.close();
 
         tmpRssSHA1 = QCryptographicHash::hash(contentsTmpRss.toLatin1(), QCryptographicHash::Sha1);
@@ -429,10 +452,6 @@ QString utils::parseDistroNews()
   {
     html = "<p align=\"center\"><h2>" + StrConstants::getAntergosNews() + "</h2></p><ul>";
   }
-  else if (distro == ectn_ARCHBSD)
-  {
-    html = "<p align=\"center\"><h2>" + StrConstants::getArchBSDNews() + "</h2></p><ul>";
-  }
   else if (distro == ectn_ARCHLINUX || distro == ectn_ARCHBANGLINUX || distro == ectn_MOOOSLINUX)
   {
     html = "<p align=\"center\"><h2>" + StrConstants::getArchLinuxNews() + "</h2></p><ul>";
@@ -440,6 +459,10 @@ QString utils::parseDistroNews()
   else if (distro == ectn_CHAKRA)
   {
     html = "<p align=\"center\"><h2>" + StrConstants::getChakraNews() + "</h2></p><ul>";
+  }
+  else if (distro == ectn_CONDRESOS)
+  {
+    html = "<p align=\"center\"><h2>" + StrConstants::getCondresOSNews() + "</h2></p><ul>";
   }
   else if (distro == ectn_KAOS)
   {
@@ -513,7 +536,7 @@ QString utils::parseDistroNews()
             else if (eText.tagName() == "pubDate")
             {
               itemPubDate = eText.text();
-              itemPubDate = itemPubDate.remove(QRegExp("\\n"));
+              itemPubDate = itemPubDate.remove(QRegularExpression("\\n"));
               int pos = itemPubDate.indexOf("+");
 
               if (pos > -1)
@@ -709,7 +732,6 @@ void utils::searchBarClosedInTextBrowser(QTextBrowser *tb, SearchBar *sb)
     tb->setFocus();
 }
 
-#if QT_VERSION >= 0x050000
 void utils::positionWindowAtScreenCenter(QWidget *w)
 {
   QRect screen;
@@ -726,4 +748,3 @@ void utils::positionWindowAtScreenCenter(QWidget *w)
   int centerY = (screen.height() - w->height()) / 2;
   w->move(QPoint(centerX, centerY));
 }
-#endif

@@ -34,6 +34,10 @@
 #include <iostream>
 #include <cassert>
 
+#ifdef QTERMWIDGET
+  #include "termwidget.h"
+#endif
+
 #include <QLabel>
 #include <QStandardItemModel>
 #include <QTextBrowser>
@@ -45,6 +49,7 @@
 #include <QProgressBar>
 #include <QSystemTrayIcon>
 #include <QToolButton>
+#include <QDebug>
 
 /*
  * Loads various application settings configured in ~/.config/octopi/octopi.conf
@@ -59,11 +64,17 @@ void MainWindow::loadSettings()
     ui->tvPackages->header()->setSortIndicator( packageListOrderedCol, packageListSortOrder );
     ui->tvPackages->sortByColumn( packageListOrderedCol, packageListSortOrder );
 
+    if (!SettingsManager::isValidSUToolSelected()){
+      SettingsManager::setSUTool(ctn_AUTOMATIC);
+    }
+
     if (!SettingsManager::isValidTerminalSelected()){
       SettingsManager::setTerminal(ctn_AUTOMATIC);
     }
   }
   else assert(false);
+
+  ui->actionUseInstantSearch->setChecked(SettingsManager::isInstantSearchSelected());
 }
 
 /*
@@ -86,7 +97,8 @@ void MainWindow::loadPanelSettings()
   }
 
   //Do we have to show or hide the Groups panel?
-  if (!SettingsManager::getShowGroupsPanel()){
+  if (!SettingsManager::getShowGroupsPanel())
+  {
     hideGroupsWidget();
   }
 }
@@ -97,7 +109,7 @@ void MainWindow::loadPanelSettings()
 void MainWindow::saveSettings(SaveSettingsReason saveSettingsReason)
 {
   switch(saveSettingsReason){
-    case ectn_CurrentTabIndex:
+    case ectn_CURRENTTABINDEX:
       SettingsManager::instance()->setCurrentTabIndex(ui->twProperties->currentIndex());
       break;
 
@@ -115,12 +127,12 @@ void MainWindow::saveSettings(SaveSettingsReason saveSettingsReason)
       SettingsManager::instance()->setShowGroupsPanel(1); //And also show Groups panel!
       break;
 
-    case ectn_AUR_PackageList:
+    case ectn_AUR_PACKAGELIST:
       SettingsManager::instance()->setAURPackageListOrderedCol(ui->tvPackages->header()->sortIndicatorSection());
       SettingsManager::instance()->setAURPackageListSortOrder(ui->tvPackages->header()->sortIndicatorOrder());
       break;
 
-    case ectn_PackageList:
+    case ectn_PACKAGELIST:
       SettingsManager::instance()->setPackageListOrderedCol(ui->tvPackages->header()->sortIndicatorSection());
       SettingsManager::instance()->setPackageListSortOrder(ui->tvPackages->header()->sortIndicatorOrder());
       break;            
@@ -137,7 +149,7 @@ void MainWindow::saveSettings(SaveSettingsReason saveSettingsReason)
 
       SettingsManager::instance()->setShowGroupsPanel(show);
       break;
-  }
+  }  
 }
 
 /*
@@ -228,18 +240,6 @@ void MainWindow::initPackageGroups()
 }
 
 /*
- * Whenever user changes the Groups widget item, this method will be triggered...
- */
-void MainWindow::onPackageGroupChanged()
-{
-  if (isAllGroupsSelected())
-  {
-    ui->actionSearchByName->setChecked(true);
-    tvPackagesSearchColumnChanged(ui->actionSearchByName);
-  }
-}
-
-/*
  * Inits the menu options and Repository menuItem in menuBar
  */
 void MainWindow::initMenuBar()
@@ -325,7 +325,7 @@ void MainWindow::initToolBar()
   {
     m_separatorForActionAUR = ui->mainToolBar->addSeparator();
     ui->mainToolBar->addAction(m_actionSwitchToAURTool);
-    m_actionSwitchToAURTool->setToolTip(m_actionSwitchToAURTool->toolTip() + "  (Ctrl+Shift+Y)");
+    m_actionSwitchToAURTool->setToolTip(m_actionSwitchToAURTool->text() + "  (Ctrl+Shift+Y)");
   }
 
   m_dummyAction = new QAction(this);
@@ -359,7 +359,12 @@ void MainWindow::initStatusBar()
   m_progressWidget->setMaximumWidth(250);
   ui->statusBar->addWidget(m_lblSelCounter);
   ui->statusBar->addWidget(m_lblTotalCounters);
-  ui->statusBar->addPermanentWidget(m_progressWidget);
+  ui->statusBar->addPermanentWidget(m_progressWidget);  
+  m_toolButtonStopTransaction = new QToolButton(this);
+  m_toolButtonStopTransaction->setDefaultAction(m_actionStopTransaction);
+  m_toolButtonStopTransaction->setVisible(false);
+  m_toolButtonStopTransaction->setAutoRaise(true);
+  ui->statusBar->addPermanentWidget(m_toolButtonStopTransaction);
 }
 
 /*
@@ -501,7 +506,9 @@ void MainWindow::initTabTransaction()
  * This is the LineEdit widget used to filter the package list
  */
 void MainWindow::initLineEditFilterPackages(){
-  connect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(reapplyPackageFilter()));
+  //if (SettingsManager::isInstantSearchSelected())
+  //  connect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(reapplyPackageFilter()));
+  toggleInstantSearch();
 }
 
 /*
@@ -509,28 +516,14 @@ void MainWindow::initLineEditFilterPackages(){
  */
 void MainWindow::initPackageTreeView()
 {
-  ui->tvPackages->setAlternatingRowColors(true);
-  ui->tvPackages->setItemDelegate(new TreeViewPackagesItemDelegate(ui->tvPackages));
-  ui->tvPackages->setContextMenuPolicy(Qt::CustomContextMenu);
-  ui->tvPackages->setSelectionMode(QAbstractItemView::ExtendedSelection);
-  ui->tvPackages->setEditTriggers(QAbstractItemView::NoEditTriggers);
-  ui->tvPackages->setVerticalScrollMode(QAbstractItemView::ScrollPerItem);
-  ui->tvPackages->setAllColumnsShowFocus( true );
+  ui->tvPackages->init();
   ui->tvPackages->setModel(m_packageModel.get());
-  ui->tvPackages->setSortingEnabled( true );
-  ui->tvPackages->setIndentation( 0 );
-  ui->tvPackages->header()->setSortIndicatorShown(true);
-  ui->tvPackages->header()->setSectionsClickable(true);
-  ui->tvPackages->header()->setSectionsMovable(false);
-  ui->tvPackages->header()->setSectionResizeMode(QHeaderView::Interactive);
-  ui->tvPackages->header()->setDefaultAlignment( Qt::AlignLeft );
-
-  resizePackageView();
+  ui->tvPackages->resizePackageView();
 
   connect(ui->tvPackages->selectionModel(), SIGNAL(selectionChanged(QItemSelection,QItemSelection)),
           this, SLOT(tvPackagesSelectionChanged(QItemSelection,QItemSelection)));
-  connect(ui->tvPackages, SIGNAL(activated(QModelIndex)), this, SLOT(changedTabIndex()));
-  connect(ui->tvPackages, SIGNAL(clicked(QModelIndex)), this, SLOT(changedTabIndex()));
+  connect(ui->tvPackages, SIGNAL(activated(QModelIndex)), this, SLOT(refreshInfoAndFileTabs()));
+  connect(ui->tvPackages, SIGNAL(clicked(QModelIndex)), this, SLOT(refreshInfoAndFileTabs()));
   connect(ui->tvPackages->header(), SIGNAL(sortIndicatorChanged(int,Qt::SortOrder)), this,
           SLOT(headerViewPackageListSortIndicatorClicked(int,Qt::SortOrder)));
   connect(ui->tvPackages, SIGNAL(customContextMenuRequested(QPoint)), this,
@@ -538,8 +531,27 @@ void MainWindow::initPackageTreeView()
   connect(ui->tvPackages, SIGNAL(doubleClicked(QModelIndex)), this, SLOT(onDoubleClickPackageList()));
 }
 
+/*
+ * Remove all Package TreeView "connect" calls
+ */
+void MainWindow::removePackageTreeViewConnections()
+{
+  disconnect(ui->tvPackages->selectionModel(), SIGNAL(selectionChanged(QItemSelection,QItemSelection)),
+          this, SLOT(tvPackagesSelectionChanged(QItemSelection,QItemSelection)));
+  disconnect(ui->tvPackages, SIGNAL(activated(QModelIndex)), this, SLOT(refreshInfoAndFileTabs()));
+  disconnect(ui->tvPackages, SIGNAL(clicked(QModelIndex)), this, SLOT(refreshInfoAndFileTabs()));
+  disconnect(ui->tvPackages->header(), SIGNAL(sortIndicatorChanged(int,Qt::SortOrder)), this,
+          SLOT(headerViewPackageListSortIndicatorClicked(int,Qt::SortOrder)));
+  disconnect(ui->tvPackages, SIGNAL(customContextMenuRequested(QPoint)), this,
+          SLOT(execContextMenuPackages(QPoint)));
+  disconnect(ui->tvPackages, SIGNAL(doubleClicked(QModelIndex)), this, SLOT(onDoubleClickPackageList()));
+}
+
 void MainWindow::resizePackageView()
 {
+  ui->tvPackages->resizePackageView();
+
+/*
   ui->tvPackages->setColumnWidth(PackageModel::ctn_PACKAGE_ICON_COLUMN,
                                  SettingsManager::getPackageIconColumnWidth());
   ui->tvPackages->setColumnWidth(PackageModel::ctn_PACKAGE_NAME_COLUMN,
@@ -548,6 +560,7 @@ void MainWindow::resizePackageView()
                                  SettingsManager::getPackageVersionColumnWidth());
   ui->tvPackages->setColumnWidth(PackageModel::ctn_PACKAGE_REPOSITORY_COLUMN,
                                  SettingsManager::getPackageRepositoryColumnWidth());
+*/
 }
 
 /*
@@ -572,7 +585,7 @@ void MainWindow::initTabInfo(){
   QString tabName(StrConstants::getTabInfoName());
   ui->twProperties->removeTab(ctn_TABINDEX_INFORMATION);
   ui->twProperties->insertTab(ctn_TABINDEX_INFORMATION, tabInfo, QApplication::translate (
-      "MainWindow", tabName.toUtf8(), 0/*, QApplication::UnicodeUTF8*/ ) );
+      "MainWindow", tabName.toUtf8(), 0));
   ui->twProperties->setUsesScrollButtons(false);
 
   SearchBar *searchBar = new SearchBar(this);
@@ -586,6 +599,73 @@ void MainWindow::initTabInfo(){
   text->show();
   text->setFocus();
 }
+
+#ifdef QTERMWIDGET  //BEGIN OF QTERMWIDGET CODE
+
+/*
+ * This is the QTermWidget used to exec AUR/pacman commands.
+ */
+void MainWindow::initTabTerminal()
+{
+  QWidget *tabTerminal = new QWidget(this);
+  QGridLayout *gridLayoutX = new QGridLayout ( tabTerminal );
+  gridLayoutX->setSpacing ( 0 );
+  gridLayoutX->setMargin ( 0 );
+
+  m_console = new TermWidget(this);
+  connect(m_console, SIGNAL(finished()), this, SLOT(initTabTerminal()));
+  connect(m_console, SIGNAL(onKeyQuit()), this, SLOT(close()));
+  connect(m_console, SIGNAL(onKeyF11()), this, SLOT(maximizeTerminalTab()));
+
+  gridLayoutX->addWidget(m_console, 0, 0, 1, 1);
+  ui->twProperties->removeTab(ctn_TABINDEX_TERMINAL);
+  QString aux(StrConstants::getTabTerminal());
+  ui->twProperties->insertTab(ctn_TABINDEX_TERMINAL, tabTerminal, QApplication::translate (
+                                                  "MainWindow", aux.toUtf8(), 0) );
+  ui->twProperties->setCurrentIndex(ctn_TABINDEX_TERMINAL);
+  m_console->setFocus();
+}
+
+/*
+ * Removes tab with the QTermWidget
+ */
+void MainWindow::removeTabTerminal()
+{
+  ui->twProperties->removeTab(ctn_TABINDEX_TERMINAL);
+  delete m_console;
+  m_console = nullptr;
+}
+
+/*
+ * Enables/Disables Tab Terminal if selected terminal is QTermWidget5
+ */
+void MainWindow::onTerminalChanged()
+{
+  if (SettingsManager::getTerminal() == ctn_QTERMWIDGET)
+    initTabTerminal();
+  else
+    removeTabTerminal();
+}
+
+/*
+ * Executes the given command in the QTermWidget5
+ */
+void MainWindow::onExecCommandInTabTerminal(QString command)
+{
+  ui->twProperties->setCurrentIndex(ctn_TABINDEX_TERMINAL);
+
+  disconnect(m_console, SIGNAL(onPressAnyKeyToContinue()), this, SLOT(onPressAnyKeyToContinue()));
+  disconnect(m_console, SIGNAL(onCancelControlKey()), this, SLOT(onCancelControlKey()));
+  connect(m_console, SIGNAL(onPressAnyKeyToContinue()), this, SLOT(onPressAnyKeyToContinue()));
+  connect(m_console, SIGNAL(onCancelControlKey()), this, SLOT(onCancelControlKey()));
+
+  m_console->enter();
+  m_console->execute("clear");
+  m_console->execute(command);
+  m_console->setFocus();
+}
+
+#endif  //END OF QTERMWIDGET CODE
 
 /*
  * This is the files treeview, which shows the directory structure of ONLY installed packages's files.
@@ -681,6 +761,8 @@ void MainWindow::initActions()
   m_actionSysInfo = new QAction(this);
   m_actionMenuMirrorCheck = new QAction(this);
   m_actionMenuOptions = new QAction(this);
+  m_actionPackageInfo = new QAction(this);
+  m_actionPackageInfo->setText(StrConstants::getTabInfoName());
 
   if(m_hasMirrorCheck)
   {
@@ -693,11 +775,17 @@ void MainWindow::initActions()
   m_actionMenuOptions->setText(StrConstants::getOptions());
   connect(m_actionMenuOptions, SIGNAL(triggered()), this, SLOT(onOptions()));
 
+  m_actionStopTransaction = new QAction(this);
+  m_actionStopTransaction->setIcon(IconHelper::getIconStop());
+  m_actionStopTransaction->setText(StrConstants::getStop());
+  connect(m_actionStopTransaction, SIGNAL(triggered()), this, SLOT(stopTransaction()));
+
   m_actionSwitchToAURTool = new QAction(this);
   m_actionSwitchToAURTool->setIcon(IconHelper::getIconForeignGreen());
   m_actionSwitchToAURTool->setText(StrConstants::getUseAURTool());
   m_actionSwitchToAURTool->setCheckable(true);
   m_actionSwitchToAURTool->setChecked(false);
+  m_actionSwitchToAURTool->setEnabled(false);
   connect(m_actionSwitchToAURTool, SIGNAL(triggered()), this, SLOT(AURToolSelected()));
 
   m_actionInstallPacmanUpdates = new QAction(this);
@@ -741,6 +829,7 @@ void MainWindow::initActions()
   ui->actionInstallLocalPackage->setIcon(IconHelper::getIconFolder());
   ui->actionOpenDirectory->setIcon(IconHelper::getIconFolder());
 
+  connect(ui->actionUseInstantSearch, SIGNAL(triggered(bool)), this, SLOT(toggleInstantSearch()));
   connect(ui->tvPackages->selectionModel(), SIGNAL(selectionChanged(QItemSelection,QItemSelection)),
           this, SLOT(invalidateTabs()));
   connect(ui->actionInstallLocalPackage, SIGNAL(triggered()), this, SLOT(installLocalPackage()));
@@ -761,6 +850,7 @@ void MainWindow::initActions()
   connect(ui->twProperties, SIGNAL(currentChanged(int)), this, SLOT(changedTabIndex()));
   connect(ui->actionHelpUsage, SIGNAL(triggered()), this, SLOT(onHelpUsage()));
   connect(ui->actionHelpAbout, SIGNAL(triggered()), this, SLOT(onHelpAbout()));
+  connect(m_actionPackageInfo, SIGNAL(triggered()), this, SLOT(showPackageInfo()));
 
   // Actions from tvPkgFileList context menu
   connect(ui->actionCollapseAllItems, SIGNAL(triggered()), this, SLOT(collapseAllContentItems()));
@@ -817,14 +907,14 @@ void MainWindow::initActions()
   if (WMHelper::isXFCERunning())
   {
     //Loop through all actions and set their icons (if any) visible to menus.
-    foreach(QAction* ac, this->findChildren<QAction*>(QRegExp("(m_a|a)ction\\S*")))
+    foreach(QAction* ac, this->findChildren<QAction*>(QRegularExpression("(m_a|a)ction\\S*")))
     {
       if (ac) ac->setIconVisibleInMenu(true);
     }
   }
 
   QString text;
-  foreach(QAction* ac, this->findChildren<QAction*>(QRegExp("(m_a|a)ction\\S*")))
+  foreach(QAction* ac, this->findChildren<QAction*>(QRegularExpression("(m_a|a)ction\\S*")))
   {
     text = ac->text().remove("&");
     ac->setText(qApp->translate("MainWindow", text.toUtf8(), 0));

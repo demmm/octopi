@@ -26,6 +26,7 @@
 #include <QPushButton>
 #include <QDialog>
 #include <QCloseEvent>
+#include <QRegularExpression>
 
 /*
  * This is the dialog used to show the transaction summary
@@ -54,7 +55,7 @@ TransactionDialog::TransactionDialog(QWidget* parent) :
   setWindowFlags(Qt::MSWindowsFixedSizeDialogHint | Qt::Dialog |
                  Qt::WindowTitleHint | Qt::WindowSystemMenuHint | Qt::WindowCloseButtonHint);
 
-  if(UnixCommand::getLinuxDistro()==ectn_CHAKRA || UnixCommand::getLinuxDistro()==ectn_ARCHBSD)
+  if(UnixCommand::getLinuxDistro()==ectn_CHAKRA)
   {
     removeYesButton();
   }
@@ -75,7 +76,7 @@ void TransactionDialog::setDetailedText(const QString detailedtext)
   ui->detailedText->setText(detailedtext);
 
   //We must search for a 'pacman-version-number' pkg to force terminal upgrade use
-  if (detailedtext.contains(QRegExp("pacman-[0-9]+")))
+  if (detailedtext.contains(QRegularExpression("pacman-[0-9]+")))
   {
     removeYesButton();
   }

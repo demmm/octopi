@@ -56,12 +56,31 @@ SettingsManager* SettingsManager::instance(){
 
 //CacheCleaner related --------------------------------------------------------------
 int SettingsManager::getKeepNumInstalledPackages() {
-  return instance()->getSYSsettings()->value(ctn_KEEP_NUM_INSTALLED, 0).toInt();
+  return instance()->getSYSsettings()->value(ctn_KEY_KEEP_NUM_INSTALLED, 0).toInt();
 }
 
 int SettingsManager::getKeepNumUninstalledPackages() {
-  return instance()->getSYSsettings()->value(ctn_KEEP_NUM_UNINSTALLED, 0).toInt();
+  return instance()->getSYSsettings()->value(ctn_KEY_KEEP_NUM_UNINSTALLED, 0).toInt();
 }
+
+void SettingsManager::setCacheCleanerWindowSize(QByteArray newValue)
+{
+  instance()->getSYSsettings()->setValue( ctn_KEY_CACHE_CLEANER_WINDOW_SIZE, newValue);
+  instance()->getSYSsettings()->sync();
+}
+
+void SettingsManager::setKeepNumInstalledPackages(int newValue)
+{
+  instance()->getSYSsettings()->setValue(ctn_KEY_KEEP_NUM_INSTALLED, newValue);
+  instance()->getSYSsettings()->sync();
+}
+
+void SettingsManager::setKeepNumUninstalledPackages(int newValue)
+{
+  instance()->getSYSsettings()->setValue(ctn_KEY_KEEP_NUM_UNINSTALLED, newValue);
+  instance()->getSYSsettings()->sync();
+}
+
 //CacheCleaner related --------------------------------------------------------------
 
 
@@ -238,6 +257,161 @@ QString SettingsManager::getOctopiGreenIconPath()
   return (p_instance.getSYSsettings()->value( ctn_KEY_OCTOPI_GREEN_ICON_PATH, "")).toString();
 }
 
+bool SettingsManager::getShowPackageNumbersOutput()
+{
+  SettingsManager p_instance;
+  return p_instance.getSYSsettings()->value( ctn_KEY_SHOW_PACKAGE_NUMBERS_OUTPUT, 1).toBool();
+}
+
+bool SettingsManager::getShowStopTransaction()
+{
+  SettingsManager p_instance;
+  return p_instance.getSYSsettings()->value( ctn_KEY_SHOW_STOP_TRANSACTION, 1).toBool();
+}
+
+QString SettingsManager::getAURTool()
+{
+  QString params;
+
+  SettingsManager p_instance;
+  QString ret = (p_instance.getSYSsettings()->value( ctn_KEY_AUR_TOOL, "")).toString();
+
+  if (ret == ctn_NO_AUR_TOOL) return ret;
+  else if (ret == ctn_PACAUR_TOOL)
+  {
+    if (getPacaurNoConfirmParam()) params += " --noconfirm ";
+    if (getPacaurNoEditParam()) params += " --noedit ";
+    ret += params;
+  }
+  else if (ret == ctn_YAOURT_TOOL)
+  {
+    if (getYaourtNoConfirmParam()) params += " --noconfirm ";
+    ret += params;
+  }
+  else if (ret == ctn_TRIZEN_TOOL)
+  {
+    if (getTrizenNoConfirmParam()) params += " --noconfirm ";
+    if (getTrizenNoEditParam()) params += " --noedit ";
+    ret += params;
+  }
+  else if (ret.isEmpty() || !UnixCommand::hasTheExecutable(ret))
+  {
+    if (UnixCommand::hasTheExecutable(ctn_TRIZEN_TOOL))
+    {
+      if (getTrizenNoConfirmParam()) params += " --noconfirm ";
+      if (getTrizenNoEditParam()) params += " --noedit ";
+
+      p_instance.setAURTool(ctn_TRIZEN_TOOL);
+      p_instance.getSYSsettings()->sync();
+      ret = ctn_TRIZEN_TOOL + params;
+    }
+    else if (UnixCommand::hasTheExecutable(ctn_YAOURT_TOOL))
+    {
+      if (getYaourtNoConfirmParam()) params += " --noconfirm ";
+
+      p_instance.setAURTool(ctn_YAOURT_TOOL);
+      p_instance.getSYSsettings()->sync();
+      ret = ctn_YAOURT_TOOL + params;
+    }
+    else if (UnixCommand::hasTheExecutable(ctn_PACAUR_TOOL))
+    {
+      if (getPacaurNoConfirmParam()) params += " --noconfirm ";
+      if (getPacaurNoEditParam()) params += " --noedit ";
+
+      p_instance.setAURTool(ctn_PACAUR_TOOL);
+      p_instance.getSYSsettings()->sync();
+      ret = ctn_PACAUR_TOOL + params;
+    }
+  }
+
+  return ret;
+}
+
+QString SettingsManager::getAURToolName()
+{
+  SettingsManager p_instance;
+  return p_instance.getSYSsettings()->value( ctn_KEY_AUR_TOOL, ctn_NO_AUR_TOOL).toString();
+}
+
+/*
+ * Tests if Pacaur is using "--noconfirm" parameter
+ */
+bool SettingsManager::getPacaurNoConfirmParam()
+{
+  SettingsManager p_instance;
+  return (p_instance.getSYSsettings()->value( ctn_KEY_PACAUR_NO_CONFIRM_PARAM, 0)).toBool();
+}
+
+/*
+ * Tests if Pacaur is using "--noedit" parameter
+ */
+bool SettingsManager::getPacaurNoEditParam()
+{
+  SettingsManager p_instance;
+  return (p_instance.getSYSsettings()->value( ctn_KEY_PACAUR_NO_EDIT_PARAM, 0)).toBool();
+}
+
+/*
+ * Tests if Yaourt is using "--noconfirm" parameter
+ */
+bool SettingsManager::getYaourtNoConfirmParam()
+{
+  SettingsManager p_instance;
+  return (p_instance.getSYSsettings()->value( ctn_KEY_YAOURT_NO_CONFIRM_PARAM, 0)).toBool();
+}
+
+/*
+ * Tests if Trizen is using "--noconfirm" parameter
+ */
+bool SettingsManager::getTrizenNoConfirmParam()
+{
+  SettingsManager p_instance;
+  return (p_instance.getSYSsettings()->value( ctn_KEY_TRIZEN_NO_CONFIRM_PARAM, 0)).toBool();
+}
+
+/*
+ * Tests if Trizen is using "--noedit" parameter
+ */
+bool SettingsManager::getTrizenNoEditParam()
+{
+  SettingsManager p_instance;
+  return (p_instance.getSYSsettings()->value( ctn_KEY_TRIZEN_NO_EDIT_PARAM, 0)).toBool();
+}
+
+bool SettingsManager::getSearchOutdatedAURPackages()
+{
+  SettingsManager p_instance;
+  return (p_instance.getSYSsettings()->value( ctn_KEY_SEARCH_OUTDATED_AUR_PACKAGES, 0)).toBool();
+}
+
+int SettingsManager::getConsoleFontSize()
+{
+  SettingsManager p_instance;
+  return (p_instance.getSYSsettings()->value( ctn_KEY_CONSOLE_SIZE, 0)).toInt();
+}
+
+/*
+ * Retrieves value of field "SU_TOOL", without guessing for AUTOMATIC
+ */
+QString SettingsManager::readSUToolValue()
+{
+  SettingsManager p_instance;
+  return (p_instance.getSYSsettings()->value( ctn_KEY_SU_TOOL, ctn_AUTOMATIC)).toString();
+}
+
+QString SettingsManager::getSUTool()
+{
+  SettingsManager p_instance;
+  QString ret = (p_instance.getSYSsettings()->value( ctn_KEY_SU_TOOL, ctn_AUTOMATIC)).toString();
+
+  if (ret == ctn_AUTOMATIC)
+  {
+    ret = WMHelper::getSUTool();
+  }
+
+  return ret;
+}
+
 bool SettingsManager::getSkipMirrorCheckAtStartup(){
   if (!instance()->getSYSsettings()->contains(ctn_KEY_SKIP_MIRRORCHECK_ON_STARTUP)){
     instance()->getSYSsettings()->setValue(ctn_KEY_SKIP_MIRRORCHECK_ON_STARTUP, 0);
@@ -272,6 +446,11 @@ bool SettingsManager::hasPacmanBackend()
   }
 }
 
+QByteArray SettingsManager::getCacheCleanerWindowSize()
+{
+  return (instance()->getSYSsettings()->value( ctn_KEY_CACHE_CLEANER_WINDOW_SIZE, 0).toByteArray());
+}
+
 QString SettingsManager::getTerminal(){
   if (!instance()->getSYSsettings()->contains(ctn_KEY_TERMINAL))
   {
@@ -292,6 +471,11 @@ QByteArray SettingsManager::getWindowSize(){
 QByteArray SettingsManager::getTransactionWindowSize()
 {
   return (instance()->getSYSsettings()->value( ctn_KEY_TRANSACTION_WINDOW_SIZE, 0).toByteArray());
+}
+
+QByteArray SettingsManager::getOutputDialogWindowSize()
+{
+  return (instance()->getSYSsettings()->value( ctn_KEY_OUTPUTDIALOG_WINDOW_SIZE, 0).toByteArray());
 }
 
 QByteArray SettingsManager::getOptionalDepsWindowSize()
@@ -391,6 +575,12 @@ void SettingsManager::setTransactionWindowSize(QByteArray newValue)
   instance()->getSYSsettings()->sync();
 }
 
+void SettingsManager::setOutputDialogWindowSize(QByteArray newValue)
+{
+  instance()->getSYSsettings()->setValue( ctn_KEY_OUTPUTDIALOG_WINDOW_SIZE, newValue);
+  instance()->getSYSsettings()->sync();
+}
+
 void SettingsManager::setOptionalDepsWindowSize(QByteArray newValue)
 {
   instance()->getSYSsettings()->setValue( ctn_KEY_OPTIONALDEPS_WINDOW_SIZE, newValue);
@@ -404,18 +594,6 @@ void SettingsManager::setSplitterHorizontalState(QByteArray newValue){
 
 void SettingsManager::setTerminal(const QString& newValue){
   instance()->getSYSsettings()->setValue( ctn_KEY_TERMINAL, newValue);
-  instance()->getSYSsettings()->sync();
-}
-
-void SettingsManager::setKeepNumInstalledPackages(int newValue)
-{
-  instance()->getSYSsettings()->setValue(ctn_KEEP_NUM_INSTALLED, newValue);
-  instance()->getSYSsettings()->sync();
-}
-
-void SettingsManager::setKeepNumUninstalledPackages(int newValue)
-{
-  instance()->getSYSsettings()->setValue(ctn_KEEP_NUM_UNINSTALLED, newValue);
   instance()->getSYSsettings()->sync();
 }
 
@@ -443,6 +621,124 @@ void SettingsManager::setPackageRepositoryColumnWidth(int newValue)
   instance()->getSYSsettings()->sync();
 }
 
+void SettingsManager::setShowPackageNumbersOutput(bool newValue)
+{
+  instance()->getSYSsettings()->setValue(ctn_KEY_SHOW_PACKAGE_NUMBERS_OUTPUT, newValue);
+  instance()->getSYSsettings()->sync();
+}
+
+void SettingsManager::setShowStopTransaction(bool newValue)
+{
+  instance()->getSYSsettings()->setValue(ctn_KEY_SHOW_STOP_TRANSACTION, newValue);
+  instance()->getSYSsettings()->sync();
+}
+
+void SettingsManager::setAURTool(const QString &newValue)
+{
+  instance()->getSYSsettings()->setValue(ctn_KEY_AUR_TOOL, newValue);
+  instance()->getSYSsettings()->sync();
+}
+
+/*
+ * Sets if Pacaur tool will use "--noconfirm" parameter
+ */
+void SettingsManager::setPacaurNoConfirmParam(bool newValue)
+{
+  instance()->getSYSsettings()->setValue(ctn_KEY_PACAUR_NO_CONFIRM_PARAM, newValue);
+  instance()->getSYSsettings()->sync();
+}
+
+/*
+ * Sets if Pacaur tool will use "--noedit" parameter
+ */
+void SettingsManager::setPacaurNoEditParam(bool newValue)
+{
+  instance()->getSYSsettings()->setValue(ctn_KEY_PACAUR_NO_EDIT_PARAM, newValue);
+  instance()->getSYSsettings()->sync();
+}
+
+/*
+ * Sets if Yaourt tool will use "--noconfirm" parameter
+ */
+void SettingsManager::setYaourtNoConfirmParam(bool newValue)
+{
+  instance()->getSYSsettings()->setValue(ctn_KEY_YAOURT_NO_CONFIRM_PARAM, newValue);
+  instance()->getSYSsettings()->sync();
+}
+
+/*
+ * Sets if Trizen tool will use "--noconfirm" parameter
+ */
+void SettingsManager::setTrizenNoConfirmParam(bool newValue)
+{
+  instance()->getSYSsettings()->setValue(ctn_KEY_TRIZEN_NO_CONFIRM_PARAM, newValue);
+  instance()->getSYSsettings()->sync();
+}
+
+/*
+ * Sets if Trizen tool will use "--noedit" parameter
+ */
+void SettingsManager::setTrizenNoEditParam(bool newValue)
+{
+  instance()->getSYSsettings()->setValue(ctn_KEY_TRIZEN_NO_EDIT_PARAM, newValue);
+  instance()->getSYSsettings()->sync();
+}
+
+void SettingsManager::setSearchOutdatedAURPackages(bool newValue)
+{
+  instance()->getSYSsettings()->setValue(ctn_KEY_SEARCH_OUTDATED_AUR_PACKAGES, newValue);
+  instance()->getSYSsettings()->sync();
+}
+
+void SettingsManager::setSUTool(const QString &newValue)
+{
+  instance()->getSYSsettings()->setValue(ctn_KEY_SU_TOOL, newValue);
+  instance()->getSYSsettings()->sync();
+}
+
+void SettingsManager::setInstantSearchSelected(bool newValue)
+{
+  instance()->getSYSsettings()->setValue(ctn_KEY_INSTANT_SEARCH, newValue);
+  instance()->getSYSsettings()->sync();
+}
+
+void SettingsManager::setConsoleFontSize(int newValue)
+{
+  instance()->getSYSsettings()->setValue(ctn_KEY_CONSOLE_SIZE, newValue);
+  instance()->getSYSsettings()->sync();
+}
+
+/*
+ * Search all supported SU tools to see if the selected one is valid
+ */
+bool SettingsManager::isValidSUToolSelected()
+{
+  QString userSUTool = readSUToolValue();
+
+  if (userSUTool == ctn_AUTOMATIC)
+    return true;
+
+  if (userSUTool == ctn_GKSU_2 ||
+      userSUTool == ctn_KDESU ||
+      userSUTool == ctn_LXQTSU ||
+      //userSUTool == ctn_OCTOPISUDO ||
+      userSUTool == ctn_TDESU)
+  {
+    if (UnixCommand::hasTheExecutable(userSUTool))
+    {
+      return true;
+    }
+    else
+    {
+      return false;
+    }
+  }
+  else
+  {
+    return false;
+  }
+}
+
 /*
  * Search all supported terminals to see if the selected one is valid
  */
@@ -453,6 +749,29 @@ bool SettingsManager::isValidTerminalSelected()
   if (userTerminal == ctn_AUTOMATIC)
     return true;
 
+#ifdef QTERMWIDGET
+  if (userTerminal == ctn_XFCE_TERMINAL ||
+      userTerminal == ctn_LXDE_TERMINAL ||
+      userTerminal == ctn_LXQT_TERMINAL ||
+      userTerminal == ctn_KDE_TERMINAL ||
+      userTerminal == ctn_TDE_TERMINAL ||
+      userTerminal == ctn_CINNAMON_TERMINAL ||
+      userTerminal == ctn_MATE_TERMINAL ||
+      userTerminal == ctn_RXVT_TERMINAL ||
+      userTerminal == ctn_QTERMWIDGET ||
+      userTerminal == ctn_XTERM)
+  {
+    if (userTerminal == ctn_QTERMWIDGET) return true;
+    else if (UnixCommand::hasTheExecutable(userTerminal))
+    {
+      return true;
+    }
+    else
+    {
+      return false;
+    }
+  }
+#else
   if (userTerminal == ctn_XFCE_TERMINAL ||
       userTerminal == ctn_LXDE_TERMINAL ||
       userTerminal == ctn_LXQT_TERMINAL ||
@@ -472,10 +791,19 @@ bool SettingsManager::isValidTerminalSelected()
       return false;
     }
   }
+#endif
+
   else
   {
     return false;
   }
+
+}
+
+bool SettingsManager::isInstantSearchSelected()
+{
+  SettingsManager p_instance;
+  return (p_instance.getSYSsettings()->value( ctn_KEY_INSTANT_SEARCH, 1)).toBool();
 }
 
 //Octopi related --------------------------------------------------------------------

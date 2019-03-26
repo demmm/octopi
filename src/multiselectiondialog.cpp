@@ -20,6 +20,7 @@
 
 #include "multiselectiondialog.h"
 #include "ui_multiselectiondialog.h"
+#include "settingsmanager.h"
 #include "strconstants.h"
 
 #include <QPushButton>
@@ -41,7 +42,6 @@ MultiSelectionDialog::MultiSelectionDialog(QWidget *parent) :
   ui->setupUi(this);
   ui->twDepPackages->setColumnCount(3);
   ui->twDepPackages->setHorizontalHeaderLabels(hhl);
-
   ui->twDepPackages->setColumnWidth(0, 150); //Package name
   ui->twDepPackages->setColumnWidth(1, 385); //Package description
   //ui->twDepPackages->horizontalHeader()->setResizeMode( QHeaderView::Fixed );

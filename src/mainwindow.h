@@ -48,6 +48,9 @@ class SearchLineEdit;
 class QAction;
 class QTreeWidgetItem;
 class QTime;
+class QDropEvent;
+class QDragEnterEvent;
+class TermWidget;
 
 #include "src/model/packagemodel.h"
 #include "src/packagerepository.h"
@@ -59,6 +62,7 @@ const int ctn_TABINDEX_TRANSACTION(2);
 const int ctn_TABINDEX_OUTPUT(3);
 const int ctn_TABINDEX_NEWS(4);
 const int ctn_TABINDEX_HELPUSAGE(5);
+const int ctn_TABINDEX_TERMINAL(6);
 
 namespace Ui {
 class MainWindow;
@@ -80,14 +84,17 @@ protected:
   void closeEvent(QCloseEvent *event);
   void keyPressEvent(QKeyEvent* ke);
   void keyReleaseEvent(QKeyEvent* ke);
+  void dropEvent(QDropEvent *ev);
+  void dragEnterEvent(QDragEnterEvent *ev);
 
 private:
   Ui::MainWindow *ui;
   CPUIntensiveComputing *m_cic;
   PacmanExec *m_pacmanExec;
-
   UnixCommand *m_unixCommand;
   bool m_initializationCompleted;
+
+  TermWidget *m_console;
 
   SearchLineEdit *m_leFilterPackage;
   QList<QModelIndex> *m_foundFilesInPkgFileList;
@@ -95,7 +102,8 @@ private:
   QFileSystemWatcher *m_pacmanDatabaseSystemWatcher;
 
   // Package Data
-  PackageRepository           m_packageRepo;
+  PackageRepository m_packageRepo;
+  // Package Model
   std::unique_ptr<PackageModel> m_packageModel;
 
   //Controls if the dialog showing the packages to be upgraded is opened
@@ -125,8 +133,11 @@ private:
   //Controls if the NewsTab must be showed
   bool m_gotoNewsTab;
 
-  //Controls if some PackageLists must be refreshed while the main pkg list is being build
+  //Controls if some PackageLists must be refreshed while the main pkg list is being built
   bool m_refreshPackageLists;
+
+  //Controls if foreign pkg list must be refreshed while the main pkg list is being built
+  bool m_refreshForeignPackageList;
 
   //Controls if Group Widget needs to regain focus
   bool m_groupWidgetNeedsFocus;
@@ -181,6 +192,7 @@ private:
   QTimer *m_outdatedAURTimer;
 
   QAction *m_dummyAction;
+  QAction *m_actionPackageInfo;
   QAction *m_actionInstallPacmanUpdates;
   QAction *m_actionInstallAURUpdates;
   QAction *m_actionShowGroups;
@@ -191,6 +203,8 @@ private:
   QAction *m_actionEditOctopiConf;
   QAction *m_actionCopyFullPath;
   QAction *m_actionSysInfo;
+  QAction *m_actionStopTransaction;
+  QToolButton *m_toolButtonStopTransaction;
 
   //Toggles use of AUR tool
   QAction *m_separatorForActionAUR;
@@ -234,6 +248,7 @@ private:
   void initActions();
   void initLineEditFilterPackages();
   void initPackageTreeView();
+  void removePackageTreeViewConnections();
   void initTabWidgetPropertiesIndex();
   void initTabInfo();
 
@@ -255,7 +270,7 @@ private:
 
   void clearStatusBar();
   void showPackagesWithNoDescription();
-  void prepareSystemUpgrade();
+  bool prepareSystemUpgrade();
 
   //Tab Transaction related methods
   bool isThereAPendingTransaction();
@@ -266,7 +281,6 @@ private:
 
   bool isPackageInInstallTransaction(const QString &pkgName);
   bool isPackageInRemoveTransaction(const QString &pkgName);
-
   void insertRemovePackageIntoTransaction(const QString &pkgName);
   void insertInstallPackageIntoTransaction(const QString &pkgName);
   void removePackagesFromRemoveTransaction();
@@ -290,6 +304,7 @@ private:
   void ensureTabVisible(const int index);
   bool isPropertiesTabWidgetVisible();
   bool isSUAvailable();
+  bool isInternetAvailable();
   void writeToTabOutput(const QString &msg, TreatURLLinks treatURLLinks = ectn_TREAT_URL_LINK);
 
   void initTabOutput();
@@ -309,14 +324,26 @@ private:
   void retrieveUnrequiredPackageList();
   void retrieveOutdatedPackageList();
 
+  bool isAURGroupSelected();
+  bool isSearchByFileSelected();
+
 private slots:
+
+#ifdef QTERMWIDGET
+  void initTabTerminal();
+  void removeTabTerminal();
+  void onTerminalChanged();
+  void onExecCommandInTabTerminal(QString command);
+  void onPressAnyKeyToContinue();
+  void onCancelControlKey();
+#endif
+
   void initToolButtonPacman();
   void initToolButtonAUR();
   void showToolButtonAUR();
 
   //TreeView methods
   void copyFullPathToClipboard();
-
   void collapseAllContentItems();
   void collapseThisContentItems();
   void expandAllContentItems();
@@ -328,10 +355,10 @@ private slots:
   void openDirectory();
   void openRootTerminal();
   void installLocalPackage();
+  void showPackageInfo();
   void findFileInPackage();
   void incrementPercentage(int);
   void outputText(const QString&);
-
   void tvPackagesSearchColumnChanged(QAction*);
   void tvPackagesSelectionChanged(const QItemSelection&, const QItemSelection&);
   void tvTransactionSelectionChanged (const QItemSelection&, const QItemSelection&);
@@ -340,7 +367,7 @@ private slots:
 
   void buildPackagesFromGroupList(const QString group);
   void buildPackageList();
-  void refreshPackageList();
+  //void refreshPackageList();
   void metaBuildPackageList();
   void onPackageGroupChanged();
 
@@ -351,6 +378,7 @@ private slots:
   void preBuildUnrequiredPackageList();
   void preBuildPackageList();
   void postBuildPackageList();
+  void refreshOutdatedAURStringList();
   void preBuildPackagesFromGroupList();
   void preBuildAURPackageList();
   void preBuildAURPackageListMeta();
@@ -368,41 +396,41 @@ private slots:
 
   //SearchLineEdit methods
   void reapplyPackageFilter();
+  void lightPackageFilter();
 
   //TabWidget methods
   void refreshTabInfo(QString pkgName);
   void refreshTabInfo(bool clearContents=false, bool neverQuit=false);
   void refreshTabFiles(bool clearContents=false, bool neverQuit=false);
   void onDoubleClickPackageList();
+  void refreshInfoAndFileTabs();
   void changedTabIndex();
   void invalidateTabs(); //This method clears the current information showed on tab.
 
-  void doRemoveAndInstall();
-  void doRemove();
+  //Pacman transaction methods
   bool doRemovePacmanLockFile();
+  void doRemove();
+  void doRemoveAndInstall();
   void doInstall();
-  void doCleanCache();
   void doSyncDatabase();
   void doMirrorCheck();
-  void doAURUpgrade();
   void doInstallAURPackage();
   void doRemoveAURPackage();
-
+  void onAURToolChanged();
   void disableTransactionActions();
   void enableTransactionActions();
+  void toggleInstantSearch();
   void toggleTransactionActions(const bool value);
   void toggleSystemActions(const bool value);
   void commitTransaction();
   void cancelTransaction();
-
-  //View menu and submenu Repository actions...
-  void selectedAllPackagesMenu();
-  void selectedInstalledPackagesMenu();
-  void selectedNonInstalledPackagesMenu();
-  void selectedRepositoryMenu(QAction *actionRepoSelected);
-
+  void stopTransaction();
+  void onCanStopTransaction(bool yesNo);
   void pacmanProcessFinished(int exitCode, QProcess::ExitStatus exitStatus);
 
+  //Tab transaction methods
+  void changeTransactionActionsState();
+  void clearTransactionTreeView();
   void insertIntoRemovePackage(QModelIndex *indexToInclude = nullptr);
   void insertIntoInstallPackage(QModelIndex *indexToInclude = nullptr);
   void insertIntoInstallPackageOptDeps(const QString &packageName);
@@ -410,8 +438,15 @@ private slots:
   void insertGroupIntoRemovePackage();
   void insertGroupIntoInstallPackage();
 
+  //View menu and submenu Repository actions...
+  void selectedAllPackagesMenu();
+  void selectedInstalledPackagesMenu();
+  void selectedNonInstalledPackagesMenu();
+  void selectedRepositoryMenu(QAction *actionRepoSelected);
+
   void hideGroupsWidget(bool pSaveSettings = true);
   void maximizePackagesTreeView(bool pSaveSettings = true);
+  void maximizeTerminalTab();
   void maximizePropertiesTabWidget(bool pSaveSettings = true);
   void outputOutdatedPackageList();
   void outputOutdatedAURPackageList();
@@ -426,8 +461,7 @@ private slots:
   void onHelpAbout();
   void onPressDelete();
 
-  void changeTransactionActionsState();
-  void clearTransactionTreeView();
+  //SearchBar methods
   void positionInPkgListSearchByFile();
   void positionInFirstMatch();
   void searchBarTextChangedInTextBrowser(const QString textToSearch);
@@ -438,6 +472,7 @@ private slots:
   void searchBarFindNextInTreeView();
   void searchBarFindPreviousInTreeView();
   void searchBarClosedInTreeView();
+
   void showAnchorDescription(const QUrl & link);
   void positionInPackageList(const QString &pkgName);
   void outputTextBrowserAnchorClicked(const QUrl & link);
@@ -445,11 +480,13 @@ private slots:
   void launchPLV();
   void launchRepoEditor();
   void launchCacheCleaner();
-  void gistSysInfo();
+  void ptpbSysInfo();
   void refreshAppIcon();
 
 public slots:
   void doSystemUpgrade(SystemUpgradeOptions sysUpgradeOption = ectn_NO_OPT);
+  void doAURUpgrade();
+  void doInstallLocalPackages();
 
 public:
   explicit MainWindow(QWidget *parent = 0);
@@ -468,15 +505,12 @@ public:
   }
 
   const PackageRepository::PackageData* getFirstPackageFromRepo(const QString pkgName);
-  bool isAURGroupSelected();
-  bool isSearchByFileSelected();
 
   void turnDebugInfoOn();
   void setCallSystemUpgrade();
   void setCallSystemUpgradeNoConfirm();
   void setRemoveCommand(const QString &removeCommand);
   void setPackagesToInstallList(QStringList pkgList){ m_packagesToInstallList = pkgList; }
-  void doInstallLocalPackages();
   bool isExecutingCommand(){ return m_commandExecuting != ectn_NONE; }
 };
 

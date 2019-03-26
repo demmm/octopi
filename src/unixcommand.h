@@ -44,6 +44,7 @@ private:
   Terminal *m_terminal;
   QProcess *m_process;
   static QFile *m_temporaryFile;
+  static QString buildOctopiHelperCommand(const QString &pCommand);
 
 public:
   UnixCommand(QObject *parent);
@@ -65,6 +66,7 @@ public:
   static QString getLinuxDistroPrettyName();
 
   static QString getPacmanVersion();
+  static bool isPacmanFiveDotOneOrHigher();
 
   static QString getShell();
 
@@ -91,7 +93,7 @@ public:
 
   static QByteArray getKCPPackageInformation(const QString &pkgName);
   static QByteArray getPackageInformation(const QString &pkgName, bool foreignPackage);
-  static QByteArray getAURPackageVersionInformation();
+  //static QByteArray getAURPackageVersionInformation();
   static QByteArray getPackageContentsUsingPacman(const QString &pkgName);
   static bool isPkgfileInstalled();
   static QByteArray getPackageContentsUsingPkgfile(const QString &pkgName);
@@ -143,12 +145,15 @@ public:
 
   void openRootTerminal();
   void runCommandInTerminal(const QStringList& commandList);
+  void runOctopiHelperInTerminal(const QStringList& commandList);
   void runCommandInTerminalAsNormalUser(const QStringList& commandList);
 
   static void execCommandAsNormalUser(const QString &pCommand);
+  static QByteArray execCommandAsNormalUserExt(const QString &pCommand);
   static void execCommand(const QString &pCommand);
 
   static QByteArray getCommandOutput(const QString &pCommand);
+  static QByteArray getCommandOutput(const QString &pCommand, const QString fileName);
 
   void executeCommand(const QString &pCommand, Language lang=ectn_LANG_ENGLISH);
   void executeCommandAsNormalUser(const QString &pCommand);
@@ -156,6 +161,8 @@ public:
   QString readAllStandardOutput();
   QString readAllStandardError();
   QString errorString();
+
+  void cancelProcess();
 
 public slots:
   void processReadyReadStandardOutput();
@@ -166,6 +173,8 @@ signals:
   void readyReadStandardOutput();
   void finished ( int, QProcess::ExitStatus );
   void readyReadStandardError();
+
+  void commandToExecInQTermWidget(QString);
 
   //ProcessWrapper signals
   void startedTerminal();

@@ -24,6 +24,8 @@
 #include "unixcommand.h"
 #include "wmhelper.h"
 
+#include <QRegularExpression>
+
 /*
  * This class decouples pacman commands executing and parser code from Octopi's interface
  */
@@ -32,10 +34,15 @@
  * Let's create the needed unixcommand object that will ultimately execute Pacman commands
  */
 PacmanExec::PacmanExec(QObject *parent) : QObject(parent)
-{
+{  
   m_unixCommand = new UnixCommand(parent);
   m_iLoveCandy = UnixCommand::isILoveCandyEnabled();
   m_debugMode = false;
+  m_processWasCanceled = false;
+  m_numberOfPackages = 0;
+  m_packageCounter = 0;
+  m_errorRetrievingFileCounter = 0;
+  m_parsingAPackageChange = false;
 
   QObject::connect(m_unixCommand, SIGNAL( started() ), this, SLOT( onStarted()));
 
@@ -51,7 +58,10 @@ PacmanExec::PacmanExec(QObject *parent) : QObject(parent)
                    this, SLOT( onReadOutput()));
 
   QObject::connect(m_unixCommand, SIGNAL( readyReadStandardError() ),
-                   this, SLOT( onReadOutputError()));
+                   this, SLOT( onReadOutputError()));  
+
+  QObject::connect(m_unixCommand, SIGNAL(commandToExecInQTermWidget(QString)),
+                   this, SIGNAL(commandToExecInQTermWidget(QString)));
 }
 
 /*
@@ -83,7 +93,7 @@ void PacmanExec::removeTemporaryFile()
  */
 bool PacmanExec::isDatabaseLocked()
 {
-  QString lockFilePath("/var/lib/pacman/db.lck");
+  QString lockFilePath(ctn_PACMAN_DATABASE_LOCK_FILE);
   QFile lockFile(lockFilePath);
 
   return (lockFile.exists());
@@ -94,7 +104,16 @@ bool PacmanExec::isDatabaseLocked()
  */
 void PacmanExec::removeDatabaseLock()
 {
-  UnixCommand::execCommand("rm /var/lib/pacman/db.lck");
+  UnixCommand::execCommand("rm " + ctn_PACMAN_DATABASE_LOCK_FILE);
+}
+
+/*
+ * Cancels the running pacman process using "killall pacman" and removing database lock file
+ */
+void PacmanExec::cancelProcess()
+{
+  m_processWasCanceled = true;
+  m_unixCommand->cancelProcess();
 }
 
 /*
@@ -102,14 +121,15 @@ void PacmanExec::removeDatabaseLock()
  */
 bool PacmanExec::searchForKeyVerbs(QString output)
 {
-  return (output.contains(QRegExp("checking ")) ||
-          output.contains(QRegExp("loading ")) ||
-          output.contains(QRegExp("installing ")) ||
-          output.contains(QRegExp("upgrading ")) ||
-          output.contains(QRegExp("downgrading ")) ||
-          output.contains(QRegExp("resolving ")) ||
-          output.contains(QRegExp("looking ")) ||
-          output.contains(QRegExp("removing ")));
+  return (output.contains(QRegularExpression("Arming ")) ||
+          output.contains(QRegularExpression("checking ")) ||
+          //output.contains(QRegularExpression("loading ")) ||
+          output.contains(QRegularExpression("installing ")) ||
+          output.contains(QRegularExpression("upgrading ")) ||
+          output.contains(QRegularExpression("downgrading ")) ||
+          //output.contains(QRegularExpression("resolving ")) ||
+          //output.contains(QRegularExpression("looking ")) ||
+          output.contains(QRegularExpression("removing ")));
 }
 
 /*
@@ -121,17 +141,18 @@ bool PacmanExec::searchForKeyVerbs(QString output)
 bool PacmanExec::splitOutputStrings(QString output)
 {
   bool res = true;
+
   QString msg = output.trimmed();
-  QStringList msgs = msg.split(QRegExp("\\n"), QString::SkipEmptyParts);
+  QStringList msgs = msg.split(QRegularExpression("\\n"), QString::SkipEmptyParts);
 
   foreach (QString m, msgs)
   {
-    QStringList m2 = m.split(QRegExp("\\(\\s{0,3}[0-9]{1,4}/[0-9]{1,4}\\) "), QString::SkipEmptyParts);
+    QStringList m2 = m.split(QRegularExpression("\\(\\s{0,3}[0-9]{1,4}/[0-9]{1,4}\\) "), QString::SkipEmptyParts);
 
     if (m2.count() == 1)
     {
       //Let's try another test... if it doesn't work, we give up.
-      QStringList maux = m.split(QRegExp("%"), QString::SkipEmptyParts);
+      QStringList maux = m.split(QRegularExpression("%"), QString::SkipEmptyParts);
       if (maux.count() > 1)
       {
         foreach (QString aux, maux)
@@ -180,6 +201,8 @@ bool PacmanExec::splitOutputStrings(QString output)
  */
 void PacmanExec::parsePacmanProcessOutput(QString output)
 {
+  m_parsingAPackageChange = false;
+
   if (m_commandExecuting == ectn_RUN_IN_TERMINAL ||
       m_commandExecuting == ectn_RUN_SYSTEM_UPGRADE_IN_TERMINAL) return;
 
@@ -189,7 +212,7 @@ void PacmanExec::parsePacmanProcessOutput(QString output)
   QString progressRun;
   QString progressEnd;
 
-  msg.remove(QRegExp(".+\\[Y/n\\].+"));
+  msg.remove(QRegularExpression(".+\\[Y/n\\].+"));
   //Let's remove color codes from strings...
   msg.remove("\033[0;1m");
   msg.remove("\033[0m");
@@ -207,6 +230,22 @@ void PacmanExec::parsePacmanProcessOutput(QString output)
   msg.remove(";37m");
   msg.remove("[c");
   msg.remove("[mo");
+
+  if (SettingsManager::getShowPackageNumbersOutput())
+  {
+    QRegularExpression re("Packages? \\(\\d+\\)");
+    QRegularExpressionMatch match = re.match(msg);
+    if (match.hasMatch())
+    {
+      QString aux_packages = match.captured(0);
+      aux_packages.remove(QRegularExpression("Packages? \\("));
+      aux_packages.remove(")");
+      m_numberOfPackages = aux_packages.toInt();
+
+      if (m_numberOfPackages > 0) m_packageCounter = 1;
+      if (m_debugMode) std::cout << "Number of packages: " << m_numberOfPackages << std::endl;
+    }
+  }
 
   if (msg.contains("exists in filesystem") ||
       (msg.contains(":: waiting for 1 process to finish repacking")) ||
@@ -258,7 +297,7 @@ void PacmanExec::parsePacmanProcessOutput(QString output)
         m_commandExecuting == ectn_REMOVE ||
         m_commandExecuting == ectn_REMOVE_INSTALL)
     {
-      int ini = msg.indexOf(QRegExp("\\(\\s{0,3}[0-9]{1,4}/[0-9]{1,4}\\) "));
+      int ini = msg.indexOf(QRegularExpression("\\(\\s{0,3}[0-9]{1,4}/[0-9]{1,4}\\) "));
       if (ini == 0)
       {
         int rp = msg.indexOf(")");
@@ -278,6 +317,10 @@ void PacmanExec::parsePacmanProcessOutput(QString output)
           {
             target = msg.left(pos);
             target = target.trimmed() + " ";
+
+            if (m_commandExecuting != ectn_SYNC_DATABASE &&
+              (!target.contains("-i686") && !target.contains("-x86_64") && !target.contains("-any"))) return; //WATCHOUT!
+
             if (m_debugMode) std::cout << "target: " << target.toLatin1().data() << std::endl;
 
             if(!target.isEmpty())
@@ -311,9 +354,12 @@ void PacmanExec::parsePacmanProcessOutput(QString output)
             target = target.trimmed() + " ";
             if (m_debugMode) std::cout << "target: " << target.toLatin1().data() << std::endl;
 
+            if (m_commandExecuting != ectn_SYNC_DATABASE &&
+              (!target.contains("-i686") && !target.contains("-x86_64") && !target.contains("-any"))) return; //WATCHOUT!
+
             if(!target.isEmpty() && !m_textPrinted.contains(target))
             {
-              if (target.indexOf(QRegExp("[a-z]+")) != -1)
+              if (target.indexOf(QRegularExpression("[a-z]+")) != -1)
               {
                 if(m_commandExecuting == ectn_SYNC_DATABASE && !target.contains("/"))
                 {
@@ -347,28 +393,31 @@ void PacmanExec::parsePacmanProcessOutput(QString output)
   else
   {
     //Let's supress some annoying string bugs...
-    msg.remove(QRegExp("\\(process.+"));
-    msg.remove(QRegExp("Using the fallback.+"));
-    msg.remove(QRegExp("Gkr-Message:.+"));
-    msg.remove(QRegExp("kdesu.+"));
-    msg.remove(QRegExp("kbuildsycoca.+"));
-    msg.remove(QRegExp("Connecting to deprecated signal.+"));
-    msg.remove(QRegExp("QVariant.+"));
-    msg.remove(QRegExp("gksu-run.+"));
-    msg.remove(QRegExp("GConf Error:.+"));
-    msg.remove(QRegExp(":: Do you want.+"));
-    msg.remove(QRegExp("org\\.kde\\."));
-    msg.remove(QRegExp("QCommandLineParser"));
-    msg.remove(QRegExp("QCoreApplication.+"));
-    msg.remove(QRegExp("Fontconfig warning.+"));
-    msg.remove(QRegExp("reading configurations from.+"));
-    msg.remove(QRegExp(".+annot load library.+"));
+    msg.remove(QRegularExpression("Don't need password!!"));
+    msg.remove(QRegularExpression("\\(process.+"));
+    msg.remove(QRegularExpression("QXcbConnection: XCB error:.+"));
+    msg.remove(QRegularExpression("Using the fallback.+"));
+    msg.remove(QRegularExpression("Gkr-Message:.+"));
+    msg.remove(QRegularExpression("kdesu.+"));
+    msg.remove(QRegularExpression("kbuildsycoca.+"));
+    msg.remove(QRegularExpression("Connecting to deprecated signal.+"));
+    msg.remove(QRegularExpression("QVariant.+"));
+    msg.remove(QRegularExpression("gksu-run.+"));
+    msg.remove(QRegularExpression("GConf Error:.+"));
+    msg.remove(QRegularExpression(":: Do.*"));
+    msg.remove(QRegularExpression("org\\.kde\\."));
+    msg.remove(QRegularExpression("QCommandLineParser"));
+    msg.remove(QRegularExpression("QCoreApplication.+"));
+    msg.remove(QRegularExpression("Fontconfig warning.+"));
+    msg.remove(QRegularExpression("reading configurations from.+"));
+    msg.remove(QRegularExpression(".+annot load library.+"));
+    msg.remove(QRegularExpression("libGL error.+"));
     msg = msg.trimmed();
 
     if (m_debugMode) std::cout << "debug: " << msg.toLatin1().data() << std::endl;
 
     QString order;
-    int ini = msg.indexOf(QRegExp("\\(\\s{0,3}[0-9]{1,4}/[0-9]{1,4}\\) "));
+    int ini = msg.indexOf(QRegularExpression("\\(\\s{0,3}[0-9]{1,4}/[0-9]{1,4}\\) "));
     if (ini == 0)
     {
       int rp = msg.indexOf(")");
@@ -378,13 +427,16 @@ void PacmanExec::parsePacmanProcessOutput(QString output)
 
     if (!msg.isEmpty())
     {
-      if (msg.contains(QRegExp("removing ")) && !m_textPrinted.contains(msg + " "))
+      if (m_textPrinted.contains(msg + " ")) return;
+
+      if (msg.contains(QRegularExpression("removing"))) //&& !m_textPrinted.contains(msg + " "))
       {
         //Does this package exist or is it a proccessOutput buggy string???
         QString pkgName = msg.mid(9).trimmed();
 
         if (pkgName.indexOf("...") != -1 || UnixCommand::isPackageInstalled(pkgName))
         {
+          m_parsingAPackageChange = true;
           prepareTextToPrint("<b><font color=\"#E55451\">" + msg + "</font></b>"); //RED
         }
       }
@@ -404,14 +456,15 @@ void PacmanExec::parsePacmanProcessOutput(QString output)
           if (m_debugMode) std::cout << "Print in black: " << msg.toLatin1().data() << std::endl;
 
           if (m_commandExecuting == ectn_SYNC_DATABASE &&
-              msg.indexOf("is up to date"))
+              msg.contains("is up to date"))
           {
             emit percentage(100);
 
             int blank = msg.indexOf(" ");
             QString repo = msg.left(blank);
 
-            if (repo.contains("error", Qt::CaseInsensitive) ||
+            if (repo.contains("warning", Qt::CaseInsensitive) ||
+                repo.contains("error", Qt::CaseInsensitive) ||
                 repo.contains("gconf", Qt::CaseInsensitive) ||
                 repo.contains("failed", Qt::CaseInsensitive) ||
                 repo.contains("fontconfig", Qt::CaseInsensitive) ||
@@ -420,6 +473,7 @@ void PacmanExec::parsePacmanProcessOutput(QString output)
             altMsg = repo + " " + StrConstants::getIsUpToDate();
           }
 
+          altMsg = Package::removeColorCodesFromStr(altMsg);
           prepareTextToPrint(altMsg); //BLACK
         }
       }
@@ -432,7 +486,7 @@ void PacmanExec::parsePacmanProcessOutput(QString output)
  */
 void PacmanExec::prepareTextToPrint(QString str, TreatString ts, TreatURLLinks tl)
 {
-  if (m_debugMode) std::cout << "_print: " << str.toLatin1().data() << std::endl;
+  if (m_debugMode) std::cout << "_print (begin): " << str.toLatin1().data() << std::endl;
 
   if (ts == ectn_DONT_TREAT_STRING)
   {
@@ -440,23 +494,24 @@ void PacmanExec::prepareTextToPrint(QString str, TreatString ts, TreatURLLinks t
     return;
   }
 
-  //If the str waiting to being print is from curl status OR any other unwanted string...
-  if ((str.contains(QRegExp("\\(\\d")) &&
-       (!str.contains("target", Qt::CaseInsensitive)) &&
-       (!str.contains("package", Qt::CaseInsensitive))) ||
-      (str.contains(QRegExp("\\d\\)")) &&
-       (!str.contains("target", Qt::CaseInsensitive)) &&
-       (!str.contains("package", Qt::CaseInsensitive))) ||
+  //If the string waiting to be printed is from curl status OR any other unwanted string...
+  if (!str.contains(QRegularExpression("<font color")))
+    if ((str.contains(QRegularExpression("\\(\\d")) &&
+         (!str.contains("target", Qt::CaseInsensitive)) &&
+         (!str.contains("package", Qt::CaseInsensitive))) ||
+        (str.contains(QRegularExpression("\\d\\)")) &&
+         (!str.contains("target", Qt::CaseInsensitive)) &&
+         (!str.contains("package", Qt::CaseInsensitive))) ||
 
-      str.indexOf("Enter a selection", Qt::CaseInsensitive) == 0 ||
-      str.indexOf("Proceed with", Qt::CaseInsensitive) == 0 ||
-      str.indexOf("%") != -1 ||
-      str.indexOf("[") != -1 ||
-      str.indexOf("]") != -1 ||
-      str.indexOf("---") != -1)
-  {
-    return;
-  }
+        str.indexOf("Enter a selection", Qt::CaseInsensitive) == 0 ||
+        str.indexOf("Proceed with", Qt::CaseInsensitive) == 0 ||
+        str.indexOf("%") != -1 ||
+        str.indexOf("[") != -1 ||
+        str.indexOf("]") != -1 ||
+        str.indexOf("---") != -1)
+    {
+      return;
+    }
 
   //If the str waiting to being print has not yet been printed...
   if(m_textPrinted.contains(str))
@@ -466,10 +521,12 @@ void PacmanExec::prepareTextToPrint(QString str, TreatString ts, TreatURLLinks t
 
   QString newStr = str;
 
-  if(newStr.contains(QRegExp("<font color")))
+  //If the string has already been colored...
+  if(newStr.contains(QRegularExpression("<font color")))
   {
     newStr += "<br>";
   }
+  //Otherwise, let's process the string to see if it needs to be colored
   else
   {
     if(newStr.contains("removing ") ||
@@ -480,35 +537,72 @@ void PacmanExec::prepareTextToPrint(QString str, TreatString ts, TreatURLLinks t
        newStr.contains("could not be found") ||
        newStr.contains(StrConstants::getCommandFinishedWithErrors()))
     {
+      newStr = newStr.trimmed();
+      if (newStr.contains(QRegularExpression("removing \\S+$")))
+      {
+        //Does this package exist or is it a proccessOutput buggy string???
+        QString pkgName = newStr.mid(9).trimmed();
+
+        if ((pkgName.indexOf("...") == -1) || UnixCommand::isPackageInstalled(pkgName))
+        {
+          m_parsingAPackageChange = true;
+        }
+      }
+
+      if (newStr.contains("failed retrieving file"))
+      {
+        m_errorRetrievingFileCounter++;
+        if (m_errorRetrievingFileCounter > 50) return;
+      }
+
       newStr = "<b><font color=\"#E55451\">" + newStr + "&nbsp;</font></b>"; //RED
-    }
-    else if(newStr.contains("checking ") ||
-            newStr.contains("is synced") ||
-            newStr.contains("-- reinstalling") ||
-            newStr.contains("installing ") ||
-            newStr.contains("upgrading ") ||
-            newStr.contains("loading ") ||
-            newStr.contains("resolving ") ||
-            newStr.contains("looking "))
-    {
-      newStr = "<b><font color=\"#4BC413\">" + newStr + "</font></b>"; //GREEN
     }
     else if (newStr.contains("warning", Qt::CaseInsensitive) || (newStr.contains("downgrading")))
     {
       newStr = "<b><font color=\"#FF8040\">" + newStr + "</font></b>"; //ORANGE
     }
+    else if(newStr.contains("checking ") ||
+            newStr.contains("is synced") ||
+            newStr.contains("-- reinstalling") ||
+            newStr.contains("installing ") ||
+            newStr.contains("upgrading ")) /*||
+            newStr.contains("loading "))*/
+    {
+      newStr = newStr.trimmed();
+      if (newStr.contains(QRegularExpression("installing \\S+$")) || newStr.contains(QRegularExpression("upgrading \\S+$")))
+      {
+        if (SettingsManager::getShowPackageNumbersOutput())
+        {
+          newStr = "(" + QString::number(m_packageCounter) + "/" + QString::number(m_numberOfPackages) + ") " + newStr;
+          if (m_packageCounter < m_numberOfPackages) m_packageCounter++;
+        }
+      }
+
+      newStr = "<b><font color=\"#4BC413\">" + newStr + "</font></b>"; //GREEN
+    }
     else if (!newStr.contains("::"))
     {
       newStr += "<br>";
     }
-  }
+  }//end of string coloring process
 
-  if (newStr.contains("::"))
+  if (newStr.contains("Synchronizing databases... (pkgfile -u)"))
+  {
+    emit canStopTransaction(false);
+  }
+  else if (newStr.contains("::"))
   {
     newStr = "<br><B>" + newStr + "</B><br><br>";
+
+    /*if (newStr.contains(":: Retrieving packages")) emit canStopTransaction(true);
+    else if (newStr.contains(":: Processing package changes")) emit canStopTransaction(false);*/
+
+    if (SettingsManager::getShowPackageNumbersOutput() &&
+        (newStr.contains(":: Retrieving packages") || (newStr.contains(":: Processing package changes"))))
+        m_packageCounter = 1;
   }
 
-  if (!newStr.contains(QRegExp("<br"))) //It was an else!
+  if (!newStr.contains(QRegularExpression("<br"))) //It was an else!
   {
     newStr += "<br>";
   }
@@ -516,7 +610,26 @@ void PacmanExec::prepareTextToPrint(QString str, TreatString ts, TreatURLLinks t
   if (tl == ectn_TREAT_URL_LINK)
     newStr = Package::makeURLClickable(newStr);
 
+  if (m_debugMode) std::cout << "_print (end): " << str.toLatin1().data() << std::endl;
+
+  //Let's append this string in the list of already printed strings (before we treat package counter code)
   m_textPrinted.append(str);
+
+  //Package counter code...
+  if (SettingsManager::getShowPackageNumbersOutput() && m_commandExecuting != ectn_SYNC_DATABASE && newStr.contains("#b4ab58"))
+  {
+    int c = newStr.indexOf("#b4ab58\">") + 9;
+    newStr.insert(c, "(" + QString::number(m_packageCounter) + "/" + QString::number(m_numberOfPackages) + ") ");
+    if (m_packageCounter < m_numberOfPackages) m_packageCounter++;
+  }
+
+  if (SettingsManager::getShowPackageNumbersOutput() && m_parsingAPackageChange)
+  {
+    int c = newStr.indexOf("#E55451\">") + 9;
+    newStr.insert(c, "(" + QString::number(m_packageCounter) + "/" + QString::number(m_numberOfPackages) + ") ");
+    if (m_packageCounter < m_numberOfPackages) m_packageCounter++;
+  }
+  //Package counter code...
 
   emit textToPrintExt(newStr);
 }
@@ -647,7 +760,7 @@ void PacmanExec::onReadOutputError()
     output.remove("[00;31m");
     output.remove("\n");
 
-    if (output.contains("Checking"), Qt::CaseInsensitive)
+    if (output.contains("Checking", Qt::CaseInsensitive))
       output += "<br>";
 
     prepareTextToPrint(output, ectn_TREAT_STRING, ectn_DONT_TREAT_URL_LINK);
@@ -676,11 +789,13 @@ void PacmanExec::onFinished(int exitCode, QProcess::ExitStatus es)
   if (m_commandExecuting == ectn_REMOVE_KCP_PKG)
   {
     if (UnixCommand::getLinuxDistro() == ectn_KAOS &&
-        UnixCommand::hasTheExecutable("kcp") &&
+        UnixCommand::hasTheExecutable(ctn_KCP_TOOL) &&
         !UnixCommand::isRootRunning())
 
       UnixCommand::execCommandAsNormalUser("kcp -u");
   }
+
+  if (m_processWasCanceled && PacmanExec::isDatabaseLocked()) exitCode = -1;
 
   emit finished(exitCode, es);
 }
@@ -701,9 +816,22 @@ void PacmanExec::doMirrorCheck()
  */
 void PacmanExec::doInstall(const QString &listOfPackages)
 {
-  QString command = "pacman -S --noconfirm " + listOfPackages;
+  QString command;
+
+  if (isDatabaseLocked())
+  {
+    command += "rm " + ctn_PACMAN_DATABASE_LOCK_FILE + "; ";
+  }
+
+  command += "pacman -S --noconfirm " + listOfPackages;
 
   m_lastCommandList.clear();
+
+  if (isDatabaseLocked())
+  {
+    m_lastCommandList.append("rm " + ctn_PACMAN_DATABASE_LOCK_FILE + ";");
+  }
+
   m_lastCommandList.append("pacman -S " + listOfPackages + ";");
   m_lastCommandList.append("echo -e;");
   m_lastCommandList.append("read -n 1 -p \"" + StrConstants::getPressAnyKey() + "\"");
@@ -718,12 +846,23 @@ void PacmanExec::doInstall(const QString &listOfPackages)
 void PacmanExec::doInstallInTerminal(const QString &listOfPackages)
 {
   m_lastCommandList.clear();
-  m_lastCommandList.append("pacman -S " + listOfPackages + ";");
-  m_lastCommandList.append("echo -e;");
+
+  if (isDatabaseLocked())
+  {
+    m_lastCommandList.append("rm " + ctn_PACMAN_DATABASE_LOCK_FILE + ";");
+  }
+
+#ifdef QTERMWIDGET
+  m_lastCommandList.append("pacman -S " + listOfPackages);
+#else
+  m_lastCommandList.append("pacman -S " + listOfPackages);
+#endif
+
+  m_lastCommandList.append("echo -e");
   m_lastCommandList.append("read -n 1 -p \"" + StrConstants::getPressAnyKey() + "\"");
 
   m_commandExecuting = ectn_RUN_IN_TERMINAL;
-  m_unixCommand->runCommandInTerminal(m_lastCommandList);
+  m_unixCommand->runOctopiHelperInTerminal(m_lastCommandList);
 }
 
 /*
@@ -731,10 +870,31 @@ void PacmanExec::doInstallInTerminal(const QString &listOfPackages)
  */
 void PacmanExec::doInstallLocal(const QString &listOfPackages)
 {
-  QString command = "pacman -U --force --noconfirm '" + listOfPackages.trimmed() + "'";
+  QString command;
+  bool dontUseForce = UnixCommand::isPacmanFiveDotOneOrHigher();
+
+  if (isDatabaseLocked())
+  {
+    command += "rm " + ctn_PACMAN_DATABASE_LOCK_FILE + "; ";
+  }
+
+  if (dontUseForce)
+    command += "pacman -U --noconfirm '" + listOfPackages.trimmed() + "'";
+  else
+    command += "pacman -U --force --noconfirm '" + listOfPackages.trimmed() + "'";
 
   m_lastCommandList.clear();
-  m_lastCommandList.append("pacman -U --force \"" + listOfPackages.trimmed() + "\";");
+
+  if (isDatabaseLocked())
+  {
+    m_lastCommandList.append("rm " + ctn_PACMAN_DATABASE_LOCK_FILE + ";");
+  }
+
+  if (dontUseForce)
+    m_lastCommandList.append("pacman -U \"" + listOfPackages.trimmed() + "\";");
+  else
+    m_lastCommandList.append("pacman -U --force \"" + listOfPackages.trimmed() + "\";");
+
   m_lastCommandList.append("echo -e;");
   m_lastCommandList.append("read -n 1 -p \"" + StrConstants::getPressAnyKey() + "\"");
 
@@ -747,13 +907,32 @@ void PacmanExec::doInstallLocal(const QString &listOfPackages)
  */
 void PacmanExec::doInstallLocalInTerminal(const QString &listOfPackages)
 {
+  bool dontUseForce = UnixCommand::isPacmanFiveDotOneOrHigher();
+
   m_lastCommandList.clear();
-  m_lastCommandList.append("pacman -U --force \"" + listOfPackages.trimmed() + "\";");
-  m_lastCommandList.append("echo -e;");
+
+  if (isDatabaseLocked())
+  {
+    m_lastCommandList.append("rm " + ctn_PACMAN_DATABASE_LOCK_FILE + ";");
+  }
+
+#ifdef QTERMWIDGET
+  if (dontUseForce)
+    m_lastCommandList.append("pacman -U \"" + listOfPackages.trimmed() + "\"");
+  else
+    m_lastCommandList.append("pacman -U --force \"" + listOfPackages.trimmed() + "\"");
+#else
+  if (dontUseForce)
+    m_lastCommandList.append("pacman -U \"" + listOfPackages.trimmed() + "\"");
+  else
+    m_lastCommandList.append("pacman -U --force \"" + listOfPackages.trimmed() + "\"");
+#endif
+
+  m_lastCommandList.append("echo -e");
   m_lastCommandList.append("read -n 1 -p \"" + StrConstants::getPressAnyKey() + "\"");
 
   m_commandExecuting = ectn_RUN_IN_TERMINAL;
-  m_unixCommand->runCommandInTerminal(m_lastCommandList);
+  m_unixCommand->runOctopiHelperInTerminal(m_lastCommandList);
 }
 
 /*
@@ -761,9 +940,22 @@ void PacmanExec::doInstallLocalInTerminal(const QString &listOfPackages)
  */
 void PacmanExec::doRemove(const QString &listOfPackages)
 {
-  QString command = "pacman -R --noconfirm " + listOfPackages;
+  QString command;
+
+  if (isDatabaseLocked())
+  {
+    command += "rm " + ctn_PACMAN_DATABASE_LOCK_FILE + "; ";
+  }
+
+  command += "pacman -R --noconfirm " + listOfPackages;
 
   m_lastCommandList.clear();
+
+  if (isDatabaseLocked())
+  {
+    m_lastCommandList.append("rm " + ctn_PACMAN_DATABASE_LOCK_FILE + ";");
+  }
+
   m_lastCommandList.append("pacman -R " + listOfPackages + ";");
   m_lastCommandList.append("echo -e;");
   m_lastCommandList.append("read -n 1 -p \"" + StrConstants::getPressAnyKey() + "\"");
@@ -778,12 +970,23 @@ void PacmanExec::doRemove(const QString &listOfPackages)
 void PacmanExec::doRemoveInTerminal(const QString &listOfPackages)
 {
   m_lastCommandList.clear();
-  m_lastCommandList.append("pacman -R " + listOfPackages + ";");
-  m_lastCommandList.append("echo -e;");
+
+  if (isDatabaseLocked())
+  {
+    m_lastCommandList.append("rm " + ctn_PACMAN_DATABASE_LOCK_FILE);
+  }
+
+#ifdef QTERMWIDGET
+  m_lastCommandList.append("pacman -R " + listOfPackages);
+#else
+  m_lastCommandList.append("pacman -R " + listOfPackages);
+#endif
+
+  m_lastCommandList.append("echo -e");
   m_lastCommandList.append("read -n 1 -p \"" + StrConstants::getPressAnyKey() + "\"");
 
   m_commandExecuting = ectn_RUN_IN_TERMINAL;
-  m_unixCommand->runCommandInTerminal(m_lastCommandList);
+  m_unixCommand->runOctopiHelperInTerminal(m_lastCommandList);
 }
 
 /*
@@ -791,10 +994,22 @@ void PacmanExec::doRemoveInTerminal(const QString &listOfPackages)
  */
 void PacmanExec::doRemoveAndInstall(const QString &listOfPackagestoRemove, const QString &listOfPackagestoInstall)
 {
-  QString command = "pacman -R --noconfirm " + listOfPackagestoRemove +
-      "; pacman -S --noconfirm " + listOfPackagestoInstall;
+  QString command;
+
+  if (isDatabaseLocked())
+  {
+    command += "rm " + ctn_PACMAN_DATABASE_LOCK_FILE + "; ";
+  }
+
+  command += "pacman -R --noconfirm " + listOfPackagestoRemove + "; pacman -S --noconfirm " + listOfPackagestoInstall;
 
   m_lastCommandList.clear();
+
+  if (isDatabaseLocked())
+  {
+    m_lastCommandList.append("rm " + ctn_PACMAN_DATABASE_LOCK_FILE + ";");
+  }
+
   m_lastCommandList.append("pacman -R " + listOfPackagestoRemove + ";");
   m_lastCommandList.append("pacman -S " + listOfPackagestoInstall + ";");
   m_lastCommandList.append("echo -e;");
@@ -810,13 +1025,29 @@ void PacmanExec::doRemoveAndInstall(const QString &listOfPackagestoRemove, const
 void PacmanExec::doRemoveAndInstallInTerminal(const QString &listOfPackagestoRemove, const QString &listOfPackagestoInstall)
 {
   m_lastCommandList.clear();
-  m_lastCommandList.append("pacman -R " + listOfPackagestoRemove + ";");
-  m_lastCommandList.append("pacman -S " + listOfPackagestoInstall + ";");
-  m_lastCommandList.append("echo -e;");
+
+  if (isDatabaseLocked())
+  {
+    m_lastCommandList.append("rm " + ctn_PACMAN_DATABASE_LOCK_FILE);
+  }
+
+#ifdef QTERMWIDGET
+  m_lastCommandList.append("pacman -R " + listOfPackagestoRemove);
+#else
+  m_lastCommandList.append("pacman -R " + listOfPackagestoRemove);
+#endif
+
+#ifdef QTERMWIDGET
+  m_lastCommandList.append("pacman -S " + listOfPackagestoInstall);
+#else
+  m_lastCommandList.append("pacman -S " + listOfPackagestoInstall);
+#endif
+
+  m_lastCommandList.append("echo -e");
   m_lastCommandList.append("read -n 1 -p \"" + StrConstants::getPressAnyKey() + "\"");
 
   m_commandExecuting = ectn_RUN_IN_TERMINAL;
-  m_unixCommand->runCommandInTerminal(m_lastCommandList);
+  m_unixCommand->runOctopiHelperInTerminal(m_lastCommandList);
 }
 
 /*
@@ -824,9 +1055,22 @@ void PacmanExec::doRemoveAndInstallInTerminal(const QString &listOfPackagestoRem
  */
 void PacmanExec::doSystemUpgrade()
 {
-  QString command = "pacman -Su --noconfirm";
+  QString command;
+
+  if (isDatabaseLocked())
+  {
+    command += "rm " + ctn_PACMAN_DATABASE_LOCK_FILE + "; ";
+  }
+
+  command += "pacman -Su --noconfirm";
 
   m_lastCommandList.clear();
+
+  if (isDatabaseLocked())
+  {
+    m_lastCommandList.append("rm " + ctn_PACMAN_DATABASE_LOCK_FILE + ";");
+  }
+
   m_lastCommandList.append("pacman -Su;");
   m_lastCommandList.append("echo -e;");
   m_lastCommandList.append("read -n 1 -p \"" + StrConstants::getPressAnyKey() + "\"");
@@ -842,16 +1086,29 @@ void PacmanExec::doSystemUpgradeInTerminal(CommandExecuting additionalCommand)
 {
   m_lastCommandList.clear();
 
-  if (additionalCommand == ectn_NONE)
-    m_lastCommandList.append("pacman -Su;");
-  else if (additionalCommand == ectn_SYNC_DATABASE)
-    m_lastCommandList.append("pacman -Syu;");
+  if (isDatabaseLocked())
+  {
+    m_lastCommandList.append("rm " + ctn_PACMAN_DATABASE_LOCK_FILE);
+  }
 
-  m_lastCommandList.append("echo -e;");
+  if (additionalCommand == ectn_NONE)
+#ifdef QTERMWIDGET
+  m_lastCommandList.append("pacman -Su");
+#else
+   m_lastCommandList.append("pacman -Su");
+#endif
+  else if (additionalCommand == ectn_SYNC_DATABASE)
+#ifdef QTERMWIDGET
+  m_lastCommandList.append("pacman -Syu");
+#else
+   m_lastCommandList.append("pacman -Syu");
+#endif
+
+  m_lastCommandList.append("echo -e");
   m_lastCommandList.append("read -n 1 -p \"" + StrConstants::getPressAnyKey() + "\"");
 
   m_commandExecuting = ectn_RUN_SYSTEM_UPGRADE_IN_TERMINAL;
-  m_unixCommand->runCommandInTerminal(m_lastCommandList);
+  m_unixCommand->runOctopiHelperInTerminal(m_lastCommandList);
 }
 
 /*
@@ -861,10 +1118,15 @@ void PacmanExec::doSyncDatabase()
 {
   QString command;
 
+  if (isDatabaseLocked())
+  {
+    command += "rm " + ctn_PACMAN_DATABASE_LOCK_FILE + "; ";
+  }
+
   if (UnixCommand::isRootRunning())
-    command = "pacman -Sy";
+    command += "pacman -Sy";
   else
-    command = "pacman -Syy";
+    command += "pacman -Syy";
 
   if (UnixCommand::hasTheExecutable("pkgfile") && !UnixCommand::isRootRunning())
     command += "; pkgfile -u";
@@ -880,13 +1142,17 @@ void PacmanExec::doAURUpgrade(const QString &listOfPackages)
 {
   m_lastCommandList.clear();
 
-  if (Package::getForeignRepositoryToolName() == "pacaur")
+  if (Package::getForeignRepositoryToolName() == ctn_PACAUR_TOOL)
   {
-    m_lastCommandList.append(Package::getForeignRepositoryToolName() + " -Sa " + listOfPackages + ";");
+    m_lastCommandList.append(Package::getForeignRepositoryToolNameParam() + " -Sa " + listOfPackages + ";");
   }
-  else if (Package::getForeignRepositoryToolName() == "yaourt")
+  else if (Package::getForeignRepositoryToolName() == ctn_YAOURT_TOOL)
   {
-    m_lastCommandList.append(Package::getForeignRepositoryToolName() + " -S " + listOfPackages + ";");
+    m_lastCommandList.append(Package::getForeignRepositoryToolNameParam() + " -S " + listOfPackages + ";");
+  }
+  else if (Package::getForeignRepositoryToolName() == ctn_TRIZEN_TOOL)
+  {
+    m_lastCommandList.append(Package::getForeignRepositoryToolNameParam() + " -Sa " + listOfPackages + ";");
   }
 
   m_lastCommandList.append("echo -e;");
@@ -904,13 +1170,15 @@ void PacmanExec::doAURInstall(const QString &listOfPackages)
   m_lastCommandList.clear();
 
   if (UnixCommand::getLinuxDistro() == ectn_KAOS)
-    m_lastCommandList.append(Package::getForeignRepositoryToolName() + " -i " + listOfPackages + ";");
-  else if (Package::getForeignRepositoryToolName() == "pacaur")
-    m_lastCommandList.append(Package::getForeignRepositoryToolName() + " -Sa " + listOfPackages + ";");
-  else if (Package::getForeignRepositoryToolName() == "yaourt")
-    m_lastCommandList.append(Package::getForeignRepositoryToolName() + " -S " + listOfPackages + ";");
-  else if (Package::getForeignRepositoryToolName() == "chaser")
-    m_lastCommandList.append(Package::getForeignRepositoryToolName() + " install " + listOfPackages + ";");
+    m_lastCommandList.append(Package::getForeignRepositoryToolNameParam() + " -i " + listOfPackages + ";");
+  else if (Package::getForeignRepositoryToolName() == ctn_PACAUR_TOOL)
+    m_lastCommandList.append(Package::getForeignRepositoryToolNameParam() + " -Sa " + listOfPackages + ";");
+  else if (Package::getForeignRepositoryToolName() == ctn_YAOURT_TOOL)
+    m_lastCommandList.append(Package::getForeignRepositoryToolNameParam() + " -S " + listOfPackages + ";");
+  else if (Package::getForeignRepositoryToolName() == ctn_TRIZEN_TOOL)
+    m_lastCommandList.append(Package::getForeignRepositoryToolNameParam() + " -Sa " + listOfPackages + ";");
+  else if (Package::getForeignRepositoryToolName() == ctn_CHASER_TOOL)
+    m_lastCommandList.append(Package::getForeignRepositoryToolNameParam() + " install " + listOfPackages + ";");
 
   m_lastCommandList.append("echo -e;");
   m_lastCommandList.append("read -n 1 -p \"" + StrConstants::getPressAnyKey() + "\"");
@@ -926,26 +1194,26 @@ void PacmanExec::doAURRemove(const QString &listOfPackages)
 {
   m_lastCommandList.clear();
 
-  if (Package::getForeignRepositoryToolName() == "chaser" ||
-      Package::getForeignRepositoryToolName() == "kcp")
+  if (Package::getForeignRepositoryToolName() == ctn_CHASER_TOOL ||
+      Package::getForeignRepositoryToolName() == ctn_KCP_TOOL)
   {
     m_lastCommandList.append("pacman -R " + listOfPackages + ";");
   }
   else
   {
-    m_lastCommandList.append(Package::getForeignRepositoryToolName() +
+    m_lastCommandList.append(Package::getForeignRepositoryToolNameParam() +
                              " -R " + listOfPackages + ";");
   }
 
   m_lastCommandList.append("echo -e;");
   m_lastCommandList.append("read -n 1 -p \"" + StrConstants::getPressAnyKey() + "\"");
 
-  if (Package::getForeignRepositoryToolName() == "kcp")
+  if (Package::getForeignRepositoryToolName() == ctn_KCP_TOOL)
     m_commandExecuting = ectn_REMOVE_KCP_PKG;
   else
     m_commandExecuting = ectn_RUN_IN_TERMINAL;
 
-  if (Package::getForeignRepositoryToolName() != "yaourt" && Package::getForeignRepositoryToolName() != "pacaur")
+  if (Package::getForeignRepositoryToolName() != ctn_YAOURT_TOOL && Package::getForeignRepositoryToolName() != ctn_PACAUR_TOOL)
     m_unixCommand->runCommandInTerminal(m_lastCommandList);
   else
     m_unixCommand->runCommandInTerminalAsNormalUser(m_lastCommandList);
@@ -954,8 +1222,30 @@ void PacmanExec::doAURRemove(const QString &listOfPackages)
 /*
  * Runs latest command inside a terminal (probably due to some previous error)
  */
-void PacmanExec::runLastestCommandInTerminal()
+void PacmanExec::runLatestCommandInTerminal()
 {
   m_commandExecuting = ectn_RUN_IN_TERMINAL;
   m_unixCommand->runCommandInTerminal(m_lastCommandList);
+}
+
+/*
+ * Runs latest command inside a terminal using "octopi-helper -t"
+ */
+void PacmanExec::runLatestCommandWithOctopiHelper()
+{
+  m_commandExecuting = ectn_RUN_IN_TERMINAL;
+  m_unixCommand->runOctopiHelperInTerminal(m_lastCommandList);
+}
+
+/*
+ * Updates pacman pkg inside a terminal using "octopi-helper -t";
+ */
+void PacmanExec::updatePacmanWithOctopiHelper()
+{
+  QStringList commands;
+  commands << "pacman -S pacman";
+  commands << "echo -e";
+  commands << "read -n 1 -p \"" + StrConstants::getPressAnyKey() + "\"";
+
+  m_unixCommand->runOctopiHelperInTerminal(commands);
 }

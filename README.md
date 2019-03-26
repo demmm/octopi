@@ -4,24 +4,23 @@ The project site is hosted at https://octopiproject.wordpress.com
 
 Currently, 10 Linux distros are compatible with it
 
- * [Antergos] (https://antergos.com/)
- * [ArchBang] (http://bbs.archbang.org/)
- * [Arch] (https://www.archlinux.org/)
- * [ArchBSD] (https://pacbsd.org/)
- * [Chakra] (https://chakralinux.org/)
- * [KaOS] (http://kaosx.us/)
- * [Manjaro] (http://manjaro.github.io/)
- * [mooOS] (http://mooos.org/)
- * [Netrunner (rolling)] 
-(http://www.netrunner.com/netrunner-rolling-release/)
- * [Parabola GNU/Linux-libre] (http://www.parabola.nu/https/)
+ * [Antergos](https://antergos.com/)
+ * [ArchBang](http://archbang.org/)
+ * [Arch](https://www.archlinux.org/)
+ * [Chakra](https://chakralinux.org/)
+ * [CondresOS](https://condresos.codelinsoft.it/)
+ * [KaOS](https://kaosx.us/)
+ * [Manjaro](https://manjaro.org/)
+ * [mooOS](http://mooos.sourceforge.net/)
+ * [Netrunner (rolling)](http://www.netrunner.com/netrunner-rolling-release/)
+ * [Parabola GNU/Linux-libre](https://www.parabola.nu/)
 
 ### What you must install in your system to have Octopi fully functional
 
 You'll need:
- * [Alpm_octopi_utils] (https://github.com/aarnt/alpm_octopi_utils/) library
- * A privilege escalation tool to use it, once running as root will ONLY work in KDE. Octopi supports 
-gksu, kdesu and lxqt-sudo for that
+ * [Alpm_octopi_utils](https://github.com/aarnt/alpm_octopi_utils/) library
+ * A privilege escalation tool to use it. Octopi supports gksu, kdesu and lxqt-sudo for that
+ * qtermwidget >= 0.8 in order to build Octopi with embedded terminal support
  
 ### Simple steps to build Octopi code
 
@@ -40,11 +39,12 @@ $ cd OCTOPI_PATH
 $ makepkg -f
 ```
 
-### How to enable the "alien" icon at toolbar
+### How to enable AUR support (that "alien" icon at toolbar)
 
-To enable AUR support, you'll need to install "yaourt" or "pacaur" in your system.  
-In Chakra, "chaser" will be supported out of the box.  
-In KaOS, "kcp" will be supported out of the box.
+To enable AUR support, you'll need to install [yaourt](https://archlinux.fr/yaourt-en), 
+[pacaur](https://github.com/rmarquis/pacaur) or [trizen](https://github.com/trizen/trizen) in your system.  
+In Chakra, [chaser](https://github.com/ccr-tools/chaser) will be supported out of the box.  
+In KaOS, [kcp](https://github.com/bvaudour/kcp) will be supported out of the box.
 
 ### Ways to help/support Octopi
 

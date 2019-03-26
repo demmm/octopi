@@ -46,10 +46,14 @@ private:
 
   void initialize();
   void initButtonBox();
+  void initGeneralTab();
+  void initAURTab();
   void initBackendTab();
   void initIconTab();
+  void initSUToolTab();
   void initSynchronizationTab();
   void initTerminalTab();
+  void removeTabByName(const QString &tabName);
 
 protected:
   virtual void paintEvent(QPaintEvent *);
@@ -57,6 +61,10 @@ protected:
 
 public:
   explicit OptionsDialog(QWidget *parent = 0);
+
+signals:
+  void AURToolChanged();
+  void terminalChanged();
 
 private slots:
   void defaultIconChecked(bool checked);
@@ -68,6 +76,10 @@ private slots:
   void selectOnceADay();
   void selectOnceADayAt();
   void selectOnceEvery();
+  void onDoNotUseAURSelected(bool checked);
+  void onPacaurSelected(bool checked);
+  void onYaourtSelected(bool checked);
+  void onTrizenSelected(bool checked);
 };
 
 #endif // OptionsDialog_H

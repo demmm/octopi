@@ -49,6 +49,13 @@ void MainWindow::refreshDistroNews(bool searchForLatestNews, bool gotoNewsTab)
 
   if (searchForLatestNews)
   {
+    if (!isInternetAvailable())
+    {
+      ui->actionGetNews->setEnabled(true);
+      ui->twProperties->setCurrentIndex(ctn_TABINDEX_NEWS);
+      return;
+    }
+
     LinuxDistro distro = UnixCommand::getLinuxDistro();
 
     if (gotoNewsTab)
@@ -67,6 +74,11 @@ void MainWindow::refreshDistroNews(bool searchForLatestNews, bool gotoNewsTab)
     {
       writeToTabOutput("<b>" +
                           StrConstants::getSearchingForDistroNews().arg("Chakra") + "</b>");
+    }
+    else if (gotoNewsTab && distro == ectn_CONDRESOS)
+    {
+      writeToTabOutput("<b>" +
+                          StrConstants::getSearchingForDistroNews().arg("Condres OS") + "</b>");
     }
     else if (gotoNewsTab && distro == ectn_KAOS)
     {
@@ -110,7 +122,11 @@ void MainWindow::refreshDistroNews(bool searchForLatestNews, bool gotoNewsTab)
  */
 void MainWindow::postRefreshDistroNews()
 {
-  showDistroNews(g_fwDistroNews.result(), true);
+  showDistroNews(g_fwDistroNews.result(), true); 
+  if (ui->twProperties->tabText(ctn_TABINDEX_NEWS).contains("**"))
+  {
+    ui->twProperties->setCurrentIndex(ctn_TABINDEX_NEWS);
+  }
 }
 
 /*

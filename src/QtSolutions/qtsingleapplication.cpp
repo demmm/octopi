@@ -341,7 +341,17 @@ void QtSingleApplication::activateWindow(const QString &message)
         actWin->show();
     }
   }
-  else if (actWin && ((message == "SYSUPGRADE") || (message == "SYSUPGRADE_NOCONFIRM"))){
+  else if (actWin && message == "SHOW") {
+    if (actWin->isHidden()){
+      actWin->setWindowState(actWin->windowState() & ~Qt::WindowMinimized);
+      actWin->raise();
+      if (actWin->isHidden())
+        actWin->show();
+    }
+  }
+  else if (actWin && ((message == "AURUPGRADE") || (message == "SYSUPGRADE") ||
+                      (message == "SYSUPGRADE_NOCONFIRM")))
+  {
     actWin->setWindowState(actWin->windowState() & ~Qt::WindowMinimized);
     actWin->raise();
     if (actWin->isHidden())
@@ -355,7 +365,11 @@ void QtSingleApplication::activateWindow(const QString &message)
     {
       if (!mw->isExecutingCommand())
       {
-        if (message == "SYSUPGRADE")
+        if (message == "AURUPGRADE")
+        {
+          mw->doAURUpgrade();
+        }
+        else if (message == "SYSUPGRADE")
         {
           mw->doSystemUpgrade();
         }

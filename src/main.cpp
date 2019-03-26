@@ -31,6 +31,8 @@
 
 int main(int argc, char *argv[])
 {
+  QApplication::setAttribute(Qt::AA_UseHighDpiPixmaps);
+
   ArgumentList *argList = new ArgumentList(argc, argv);
   QString packagesToInstall;
   QString arg;
@@ -38,7 +40,7 @@ int main(int argc, char *argv[])
   for (int c=1; c<argc; c++)
   {
     arg = argv[c];
-    if (arg.contains(QRegExp("pkg.tar.[gz|xz]")))
+    if (arg.contains(QRegularExpression("pkg.tar.[gz|xz]")))
     {
       packagesToInstall += arg + ",";
     }
@@ -48,7 +50,11 @@ int main(int argc, char *argv[])
 
   if (app.isRunning())
   {
-    if (argList->getSwitch("-sysupgrade"))
+    if (argList->getSwitch("-aurupgrade"))
+    {
+      app.sendMessage("AURUPGRADE");
+    }
+    else if (argList->getSwitch("-sysupgrade"))
     {
       app.sendMessage("SYSUPGRADE");
     }
@@ -63,6 +69,10 @@ int main(int argc, char *argv[])
     else if (argList->getSwitch("-hide"))
     {
       app.sendMessage("HIDE");
+    }
+    else if (argList->getSwitch("-show"))
+    {
+      app.sendMessage("SHOW");
     }
     else if (!packagesToInstall.isEmpty())
     {
@@ -101,7 +111,7 @@ int main(int argc, char *argv[])
     return(0);
   }
 
-  if (UnixCommand::isRootRunning() && !WMHelper::isKDERunning()){
+  if (UnixCommand::isRootRunning()){
     QMessageBox::critical( 0, StrConstants::getApplicationName(), StrConstants::getErrorRunningWithRoot());
     return ( -2 );
   }

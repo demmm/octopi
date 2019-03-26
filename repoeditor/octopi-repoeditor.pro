@@ -4,7 +4,7 @@
 #
 #-------------------------------------------------
 
-QT += core gui network widgets
+QT += core gui network xml widgets
 
 CONFIG += qt console warn_on debug
 
@@ -19,7 +19,15 @@ HEADERS += addrepo.h \
             optionsdelegate.h \
             repoconf.h \
             repoeditor.h \
-            repoentry.h \
+            repoentry.h \          
+            ../src/unixcommand.h \
+            ../src/strconstants.h \
+            ../src/wmhelper.h \
+            ../src/terminal.h \
+            ../src/settingsmanager.h \
+            ../src/searchlineedit.h \
+            ../src/utils.h \
+            ../src/package.h \
             ../src/QtSolutions/qtsingleapplication.h \
             ../src/QtSolutions/qtlocalpeer.h \
             ../src/QtSolutions/qtlockedfile.h \
@@ -32,6 +40,14 @@ SOURCES += addrepo.cpp \
            repoconf.cpp \
            repoeditor.cpp \
            repoentry.cpp \
+           ../src/unixcommand.cpp \
+           ../src/strconstants.cpp \
+            ../src/wmhelper.cpp \
+            ../src/terminal.cpp \
+            ../src/settingsmanager.cpp \
+            ../src/searchlineedit.cpp \
+            ../src/utils.cpp \
+            ../src/package.cpp \
            ../src/QtSolutions/qtsingleapplication.cpp \
            ../src/QtSolutions/qtlocalpeer.cpp \
            ../src/QtSolutions/qtlockedfile.cpp \
@@ -61,6 +77,8 @@ TRANSLATIONS += resources/translations/octopi_repoeditor_pt_BR.ts \
     resources/translations/octopi_repoeditor_da.ts \
     resources/translations/octopi_repoeditor_cs.ts \
     resources/translations/octopi_repoeditor_he.ts \
+    resources/translations/octopi_repoeditor_hi.ts \
+    resources/translations/octopi_repoeditor_hi_IN.ts \
     resources/translations/octopi_repoeditor_lt.ts \
     resources/translations/octopi_repoeditor_nb.ts \
     resources/translations/octopi_repoeditor_sr@latin.ts \

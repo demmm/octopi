@@ -5,15 +5,19 @@
 #-------------------------------------------------
 
 QT += core gui network xml dbus widgets
-DEFINES += OCTOPI_EXTENSIONS ALPM_BACKEND
-CONFIG += qt warn_on debug link_pkgconfig ALPM_BACKEND
+DEFINES += OCTOPI_EXTENSIONS ALPM_BACKEND QTERMWIDGET
+CONFIG += qt warn_on debug link_pkgconfig ALPM_BACKEND QTERMWIDGET
 
 ALPM_BACKEND {
   QMAKE_CXXFLAGS += -std=c++11
-  PKGCONFIG += glib-2.0
-  LIBS += -lglib-2.0 -lalpm -lalpm_octopi_utils
+  PKGCONFIG += glib-2.0 libalpm
+  LIBS += -lalpm_octopi_utils
 } else {
   QMAKE_CXXFLAGS += -std=c++11
+}
+
+QTERMWIDGET {
+  LIBS += -lqtermwidget5
 }
 
 TEMPLATE = app
@@ -47,7 +51,12 @@ HEADERS += src/QtSolutions/qtsingleapplication.h \
         src/terminal.h \
         src/pacmanexec.h \
         src/constants.h \
-    src/optionsdialog.h
+        src/optionsdialog.h \
+        src/packagetreeview.h
+
+QTERMWIDGET{
+  HEADERS += src/termwidget.h
+}
 
 ALPM_BACKEND{
   HEADERS += src/alpmbackend.h
@@ -59,6 +68,7 @@ SOURCES += src/QtSolutions/qtsingleapplication.cpp \
         src/repoconf.cpp \
         src/main.cpp\
         src/mainwindow.cpp \
+        src/strconstants.cpp \
         src/searchlineedit.cpp \
         src/argumentlist.cpp \
         src/settingsmanager.cpp \
@@ -83,7 +93,12 @@ SOURCES += src/QtSolutions/qtsingleapplication.cpp \
         src/utils.cpp \
         src/terminal.cpp \
         src/pacmanexec.cpp \
-    src/optionsdialog.cpp
+        src/optionsdialog.cpp \
+        src/packagetreeview.cpp
+
+QTERMWIDGET{
+  SOURCES += src/termwidget.cpp
+}
 
 ALPM_BACKEND{
   SOURCES += src/alpmbackend.cpp
@@ -115,6 +130,8 @@ TRANSLATIONS += resources/translations/octopi_pt_BR.ts \
     resources/translations/octopi_da.ts \
     resources/translations/octopi_cs.ts \
     resources/translations/octopi_he.ts \
+    resources/translations/octopi_hi.ts \
+    resources/translations/octopi_hi_IN.ts \
     resources/translations/octopi_lt.ts \
     resources/translations/octopi_nb.ts \
     resources/translations/octopi_sr@latin.ts \

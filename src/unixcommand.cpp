@@ -25,17 +25,68 @@
 #include <iostream>
 
 #include <QProcess>
+#include <QRegularExpression>
 #include <QFile>
 #include <QFileInfo>
 #include <QByteArray>
 #include <QTextStream>
-#include <QtNetwork/QNetworkInterface>
+#include <QtNetwork>
 
 /*
  * Collection of methods to execute many Unix commands
  */
 
 QFile *UnixCommand::m_temporaryFile = 0;
+
+/*
+ * UnixCommand's constructor: the relevant environment english setting and the connectors
+ */
+UnixCommand::UnixCommand(QObject *parent): QObject()
+{
+  m_process = new QProcess(parent);
+  //m_process->setInputChannelMode(QProcess::ForwardedInputChannel);
+  //m_process->setProcessChannelMode(QProcess::ForwardedOutputChannel);
+  m_terminal = new Terminal(parent, SettingsManager::getTerminal());
+
+  QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+  env.insert("LANG", "C");
+  env.insert("LC_MESSAGES", "C");
+  m_process->setProcessEnvironment(env);
+
+  QObject::connect(m_process, SIGNAL( started() ), this,
+                   SIGNAL( started() ));
+  QObject::connect(this, SIGNAL( started() ), this,
+                   SLOT( processReadyReadStandardOutput() ));
+
+  QObject::connect(m_process, SIGNAL( readyReadStandardOutput() ), this,
+                   SIGNAL( readyReadStandardOutput() ));
+  QObject::connect(this, SIGNAL( readyReadStandardOutput() ), this,
+                   SLOT( processReadyReadStandardOutput() ));
+
+  QObject::connect(m_process, SIGNAL( finished ( int, QProcess::ExitStatus )), this,
+                   SIGNAL( finished ( int, QProcess::ExitStatus )) );
+  QObject::connect(this, SIGNAL( finished ( int, QProcess::ExitStatus )), this,
+                   SLOT( processReadyReadStandardOutput() ));
+
+  QObject::connect(m_process, SIGNAL( readyReadStandardError() ), this,
+                   SIGNAL( readyReadStandardError() ));
+  QObject::connect(this, SIGNAL( readyReadStandardError() ), this,
+                   SLOT( processReadyReadStandardError() ));
+
+  //Terminal signals
+  QObject::connect(m_terminal, SIGNAL( started()), this,
+                   SIGNAL( started()));
+  QObject::connect(m_terminal, SIGNAL( finished ( int, QProcess::ExitStatus )), this,
+                   SIGNAL( finished ( int, QProcess::ExitStatus )) );
+
+  QObject::connect(m_terminal, SIGNAL( startedTerminal()), this,
+                   SIGNAL( startedTerminal()));
+  QObject::connect(m_terminal, SIGNAL( finishedTerminal(int,QProcess::ExitStatus)), this,
+                   SIGNAL( finishedTerminal(int,QProcess::ExitStatus)));
+
+  QObject::connect(m_terminal, SIGNAL(commandToExecInQTermWidget(QString)), this,
+                   SIGNAL(commandToExecInQTermWidget(QString)));
+}
 
 /*
  * Executes given command and returns the StandardError Output.
@@ -118,12 +169,7 @@ QString UnixCommand::discoverBinaryPath(const QString& binary){
 bool UnixCommand::cleanPacmanCache()
 {
   QProcess pacman;
-  /*QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-  env.insert("LANG", "C");
-  env.insert("LC_MESSAGES", "C");
-  pacman.setProcessEnvironment(env);*/
   QString commandStr = "\"yes | pacman -Scc\"";
-
   QString command = WMHelper::getSUCommand() + " " + commandStr;
   pacman.start(command);
   pacman.waitForFinished();
@@ -182,13 +228,12 @@ QByteArray UnixCommand::performAURCommand(const QString &args)
 {
   QByteArray result("");
   QProcess aur;
-
   QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
   env.insert("LANG", "C");
   env.insert("LC_MESSAGES", "C");
   aur.setProcessEnvironment(env);
 
-  aur.start(Package::getForeignRepositoryToolName() + " " + args);
+  aur.start(Package::getForeignRepositoryToolNameParam() + " " + args);
   aur.waitForFinished(-1);
   result = aur.readAllStandardOutput();
 
@@ -218,10 +263,10 @@ QByteArray UnixCommand::getAURUrl(const QString &pkgName)
 
   aur.setProcessEnvironment(env);
 
-  if (Package::getForeignRepositoryToolName() == "chaser")
-    aur.start(Package::getForeignRepositoryToolName() + " info " + pkgName);
+  if (Package::getForeignRepositoryToolName() == ctn_CHASER_TOOL)
+    aur.start(Package::getForeignRepositoryToolNameParam() + " info " + pkgName);
   else
-    aur.start(Package::getForeignRepositoryToolName() + " -Sia " + pkgName);
+    aur.start(Package::getForeignRepositoryToolNameParam() + " -Sia " + pkgName);
 
   aur.waitForFinished(-1);
 
@@ -242,15 +287,17 @@ QByteArray UnixCommand::getAURPackageList(const QString &searchString)
   aur.setProcessEnvironment(env);
 
   if (UnixCommand::getLinuxDistro() == ectn_KAOS)
-    aur.start(Package::getForeignRepositoryToolName() + " -l ");
+    aur.start(Package::getForeignRepositoryToolNameParam() + " -l ");
   else
   {
-    if (Package::getForeignRepositoryToolName() == "yaourt")
-      aur.start(Package::getForeignRepositoryToolName() + " --nocolor -Ss " + searchString);
-    else if (Package::getForeignRepositoryToolName() == "chaser")
-      aur.start(Package::getForeignRepositoryToolName() + " search " + searchString);
+    if (Package::getForeignRepositoryToolName() == ctn_YAOURT_TOOL)
+      aur.start(Package::getForeignRepositoryToolNameParam() + " --nocolor -Ss " + searchString);
+    else if (Package::getForeignRepositoryToolName() == ctn_TRIZEN_TOOL)
+        aur.start(Package::getForeignRepositoryToolNameParam() + " --nocolors -Ssa " + searchString);
+    else if (Package::getForeignRepositoryToolName() == ctn_CHASER_TOOL)
+      aur.start(Package::getForeignRepositoryToolNameParam() + " search " + searchString);
     else
-      aur.start(Package::getForeignRepositoryToolName() + " -Ss " + searchString);
+      aur.start(Package::getForeignRepositoryToolNameParam() + " -Ss " + searchString);
   }
 
   aur.waitForFinished(-1);
@@ -324,15 +371,16 @@ QByteArray UnixCommand::getOutdatedAURPackageList()
 {
   QByteArray result;
 
-  if (Package::getForeignRepositoryToolName() == "kcp")
+  if (Package::getForeignRepositoryToolName() == ctn_KCP_TOOL)
   {
     result = performAURCommand("-lO");
   }
-  else if (Package::getForeignRepositoryToolName() != "kcp")
+  else if (Package::getForeignRepositoryToolName() != ctn_KCP_TOOL)
   {
     result = performAURCommand("-Qua");
   }
 
+  //return ":: aur  micro-git  v1.3.3.d6ccaf0-1  ->  v1.3.4\n";
   return result;
 }
 
@@ -399,26 +447,6 @@ QByteArray UnixCommand::getPackageInformation(const QString &pkgName, bool forei
     args << pkgName;
 
   QByteArray result = performQuery(args);
-  return result;
-}
-
-/*
- * Given an AUR package name, returns a string containing all of its information fields
- * (ex: name, description, version, dependsOn...)
- */
-QByteArray UnixCommand::getAURPackageVersionInformation()
-{
-  QByteArray result;
-
-  if (Package::getForeignRepositoryToolName() == "kcp")
-  {
-    result = performAURCommand("-lO");
-  }
-  else if (Package::getForeignRepositoryToolName() != "kcp")
-  {
-    result = performAURCommand("-Qua");
-  }
-
   return result;
 }
 
@@ -611,10 +639,10 @@ bool UnixCommand::hasInternetConnection()
   }
 
   //It seems to be alright, but let's make a ping to see the result
-  /*if (result == true)
+  if (result == true)
   {
     result = UnixCommand::doInternetPingTest();
-  }*/
+  }
 
   return result;
 }
@@ -624,23 +652,21 @@ bool UnixCommand::hasInternetConnection()
  */
 bool UnixCommand::doInternetPingTest()
 {
-  QProcess ping;
-  QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-  env.insert("LANG", "C");
-  env.insert("LC_MESSAGES", "C");
-  ping.setProcessEnvironment(env);
+  QTcpSocket socket;
+  QString hostname = "www.google.com";
 
-  if (UnixCommand::getLinuxDistro() == ectn_MOOOSLINUX)
-    ping.start("torsocks ping -c 1 -W 3 www.google.com");
+  socket.connectToHost(hostname, 80);
+  if (socket.waitForConnected(5000))
+    return true;
   else
-    ping.start("ping -c 1 -W 3 www.google.com");
-
-  ping.waitForFinished();
-
-  int res = ping.exitCode();
-  ping.close();
-
-  return (res == 0);
+  {
+    hostname = "www.baidu.com";
+    socket.connectToHost(hostname, 80);
+    if (socket.waitForConnected(5000))
+      return true;
+    else
+      return false;
+  }
 }
 
 /*
@@ -648,8 +674,6 @@ bool UnixCommand::doInternetPingTest()
  */
 bool UnixCommand::hasTheExecutable( const QString& exeName )
 {
-  //std::cout << "Searching for the executable: " << exeName.toLatin1().data() << std::endl;
-
   QProcess proc;
   proc.setProcessChannelMode(QProcess::MergedChannels);
   QString sParam = "\"which " + exeName + "\"";
@@ -670,7 +694,7 @@ void UnixCommand::removeTemporaryFiles()
 {
   QDir tempDir(QDir::tempPath());
   QStringList nameFilters;
-  nameFilters << "qtsingleapp*" << "gpg*" << ".qt_temp_*";
+  nameFilters << "qtsingleapp-Octopi*" << "qtsingleapp-CacheC*" << "qtsingleapp-Reposi*"  /*<< "gpg*"*/ << ".qt_temp_octopi*";
   QFileInfoList list = tempDir.entryInfoList(nameFilters, QDir::Dirs | QDir::Files | QDir::System | QDir::Hidden);
 
   foreach(QFileInfo file, list){
@@ -702,6 +726,26 @@ void UnixCommand::execCommandAsNormalUser(const QString &pCommand)
 }
 
 /*
+ * Execs a command as normal user and returns its output
+ */
+QByteArray UnixCommand::execCommandAsNormalUserExt(const QString &pCommand)
+{
+  QProcess p;
+  QByteArray res;
+  QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+
+  env.insert("LANG", "C");
+  env.insert("LC_MESSAGES", "C");
+  p.setProcessEnvironment(env);
+
+  p.start(pCommand);
+  p.waitForFinished(-1);
+  res = p.readAllStandardOutput();
+  p.close();
+  return res;
+}
+
+/*
  * Runs a command with a QProcess blocking object!
  */
 void UnixCommand::execCommand(const QString &pCommand)
@@ -728,6 +772,19 @@ QByteArray UnixCommand::getCommandOutput(const QString &pCommand)
   env.insert("LC_MESSAGES", "C");
   p.setProcessEnvironment(env);*/
 
+  p.start(pCommand);
+  p.waitForFinished(-1);
+  return p.readAllStandardOutput();
+}
+
+/*
+ * Runs a command with a QProcess blocking object and returns its output!
+ */
+QByteArray UnixCommand::getCommandOutput(const QString &pCommand, const QString fileName)
+{
+  QProcess p;
+
+  p.setStandardInputFile(fileName);
   p.start(pCommand);
   p.waitForFinished(-1);
   return p.readAllStandardOutput();
@@ -768,14 +825,22 @@ void UnixCommand::openRootTerminal(){
 }
 
 /*
- * Executes given commandToRun inside a terminal, so the user can interact
+ * Executes given commandList as root inside a terminal, so the user can interact
  */
 void UnixCommand::runCommandInTerminal(const QStringList& commandList){
   m_terminal->runCommandInTerminal(commandList);
 }
 
 /*
- * Executes given commandToRun inside a terminal, as the current user!
+ * Executes given commandList as root inside a terminal using "octopi-helper -t", so the user can interact
+ */
+void UnixCommand::runOctopiHelperInTerminal(const QStringList &commandList)
+{
+  m_terminal->runOctopiHelperInTerminal(commandList);
+}
+
+/*
+ * Executes given commandList inside a terminal, as the current user!
  */
 void UnixCommand::runCommandInTerminalAsNormalUser(const QStringList &commandList)
 {
@@ -813,13 +878,15 @@ void UnixCommand::executeCommand(const QString &pCommand, Language lang)
     m_process->setProcessEnvironment(env);
   }
 
-  if(isRootRunning())
+  QString suCommand = WMHelper::getSUCommand();
+
+  if (suCommand == WMHelper::getLXQTSUCommand())
   {
-    command += "dbus-launch " + pCommand;
+    command = buildOctopiHelperCommand(pCommand);
   }
-  else
+  else //We are not using "octopi-sudo" utility...*/
   {
-    command = WMHelper::getSUCommand() + "\"" + pCommand + "\"";
+    command = suCommand + "\"" + pCommand + "\"";
   }
 
   m_process->start(command);
@@ -879,48 +946,66 @@ QString UnixCommand::errorString()
 }
 
 /*
- * UnixCommand's constructor: the relevant environment english setting and the connectors
+ * Constructs the octopi-sudo related command to execute given pCommand using "octopi-helper" utility
  */
-UnixCommand::UnixCommand(QObject *parent): QObject()
+QString UnixCommand::buildOctopiHelperCommand(const QString &pCommand)
 {
-  m_process = new QProcess(parent);
-  m_terminal = new Terminal(parent, SettingsManager::getTerminal());
+  QString octopiHelperCommandParameter;
+  QStringList commandList;
+  QString suCommand = WMHelper::getSUCommand();
+  QFile *ftemp = UnixCommand::getTemporaryFile();
+  QTextStream out(ftemp);
 
-  QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-  env.insert("LANG", "C");
-  env.insert("LC_MESSAGES", "C");
-  m_process->setProcessEnvironment(env);
+  //If this is a multiple command string, let's break it
+  if (pCommand.contains(";"))
+  {
+    commandList = pCommand.split(";", QString::SkipEmptyParts);
 
-  QObject::connect(m_process, SIGNAL( started() ), this,
-                   SIGNAL( started() ));
-  QObject::connect(this, SIGNAL( started() ), this,
-                   SLOT( processReadyReadStandardOutput() ));
+    foreach(QString line, commandList)
+    {
+      out << line.trimmed() << "\n";
+    }
+  }
+  else //We have just one command here
+  {
+    commandList << pCommand.trimmed();
+    out << commandList.first();
+  }
 
-  QObject::connect(m_process, SIGNAL( readyReadStandardOutput() ), this,
-                   SIGNAL( readyReadStandardOutput() ));
-  QObject::connect(this, SIGNAL( readyReadStandardOutput() ), this,
-                   SLOT( processReadyReadStandardOutput() ));
+  out.flush();
+  ftemp->close();
 
-  QObject::connect(m_process, SIGNAL( finished ( int, QProcess::ExitStatus )), this,
-                   SIGNAL( finished ( int, QProcess::ExitStatus )) );
-  QObject::connect(this, SIGNAL( finished ( int, QProcess::ExitStatus )), this,
-                   SLOT( processReadyReadStandardOutput() ));
+  //Here we select the proper "octopi-helper" parameter
+  if (commandList.count() ==1 && commandList.contains("pacman -Syy"))
+    octopiHelperCommandParameter = " -s";
+  else if (commandList.count() ==1 && commandList.contains("pacman -Su"))
+    octopiHelperCommandParameter = " -u";
+  else
+    octopiHelperCommandParameter = " -t";
 
-  QObject::connect(m_process, SIGNAL( readyReadStandardError() ), this,
-                   SIGNAL( readyReadStandardError() ));
-  QObject::connect(this, SIGNAL( readyReadStandardError() ), this,
-                   SLOT( processReadyReadStandardError() ));
+  return suCommand + ctn_OCTOPI_HELPER + octopiHelperCommandParameter;
+}
 
-  //Terminal signals
-  QObject::connect(m_terminal, SIGNAL( started()), this,
-                   SIGNAL( started()));
-  QObject::connect(m_terminal, SIGNAL( finished ( int, QProcess::ExitStatus )), this,
-                   SIGNAL( finished ( int, QProcess::ExitStatus )) );
+/*
+ * Cancels the running process
+ */
+void UnixCommand::cancelProcess()
+{
+  QProcess pacman;
+  QString suCommand = WMHelper::getSUCommand();
+  QString pCommand = "killall pacman; rm " + ctn_PACMAN_DATABASE_LOCK_FILE;
+  QString result;
 
-  QObject::connect(m_terminal, SIGNAL( startedTerminal()), this,
-                   SIGNAL( startedTerminal()));
-  QObject::connect(m_terminal, SIGNAL( finishedTerminal(int,QProcess::ExitStatus)), this,
-                   SIGNAL( finishedTerminal(int,QProcess::ExitStatus)));
+  if (suCommand == WMHelper::getLXQTSUCommand())
+  {
+    result = buildOctopiHelperCommand(pCommand);
+  }
+  else {
+    result = suCommand + "\"" + pCommand + "\"";
+  }
+
+  pacman.start(result);
+  pacman.waitForFinished(-1);
 }
 
 /*
@@ -1037,8 +1122,8 @@ QStringList UnixCommand::getFieldFromPacmanConf(const QString &fieldName)
         int newLine = ignorePkg.indexOf("\n");
 
         ignorePkg = ignorePkg.mid(equal+1, newLine-(equal+1)).trimmed();
-        result = ignorePkg.split(QRegExp("\\s+"), QString::SkipEmptyParts);
-        break;
+        result += ignorePkg.split(QRegularExpression("\\s+"), QString::SkipEmptyParts);
+        from = end + newLine;
       }
       else if (str != "#")
         from += end + ctn_FIELD_LENGTH;
@@ -1105,43 +1190,43 @@ LinuxDistro UnixCommand::getLinuxDistro()
 
       QString contents = file.readAll();
 
-      if (contents.contains(QRegExp("Antergos")))
+      if (contents.contains(QRegularExpression("Antergos")))
       {
         ret = ectn_ANTERGOS;
       }
-      else if (contents.contains(QRegExp("ArchBang")))
+      else if (contents.contains(QRegularExpression("ArchBang")))
       {
         ret = ectn_ARCHBANGLINUX;
       }
-      else if (contents.contains(QRegExp("Arch BSD")))
-      {
-        ret = ectn_ARCHBSD;
-      }
-      else if (contents.contains(QRegExp("Arch Linux")))
+      else if (contents.contains(QRegularExpression("Arch Linux")))
       {
         ret = ectn_ARCHLINUX;
       }
-      else if (contents.contains(QRegExp("Chakra")))
+      else if (contents.contains(QRegularExpression("Chakra")))
       {
         ret = ectn_CHAKRA;
       }
-      else if (contents.contains(QRegExp("KaOS")))
+      else if (contents.contains(QRegularExpression("Condres OS")))
+      {
+        ret = ectn_CONDRESOS;
+      }
+      else if (contents.contains(QRegularExpression("KaOS")))
       {
         ret = ectn_KAOS;
       }
-      else if (contents.contains(QRegExp("Manjaro")))
+      else if (contents.contains(QRegularExpression("Manjaro")))
       {
         ret = ectn_MANJAROLINUX;
       }
-      else if (contents.contains(QRegExp("mooOS")))
+      else if (contents.contains(QRegularExpression("mooOS")))
       {
         ret = ectn_MOOOSLINUX;
       }
-      else if (contents.contains(QRegExp("Netrunner")))
+      else if (contents.contains(QRegularExpression("Netrunner")))
       {
         ret = ectn_NETRUNNER;
       }
-      else if (contents.contains(QRegExp("Parabola GNU/Linux-libre")))
+      else if (contents.contains(QRegularExpression("Parabola GNU/Linux-libre")))
       {
         ret = ectn_PARABOLA;
       }
@@ -1204,6 +1289,34 @@ QString UnixCommand::getPacmanVersion()
   if (p >=0 && q >= 0)
   {
     res = v.mid(p+6, q-(p+6)).trimmed();
+  }
+
+  return res;
+}
+
+/*
+ * Tests if the installed pacman version is >= 5.1
+ */
+bool UnixCommand::isPacmanFiveDotOneOrHigher()
+{
+  bool res = false;
+  QString major, minor;
+  int ma, mi;
+
+  //v5.1.0
+  QString pacmanVersion = UnixCommand::getPacmanVersion();
+  if (pacmanVersion.length() == 6)
+  {
+    major = pacmanVersion.at(1);
+    minor = pacmanVersion.at(3);
+
+    ma = major.toInt();
+    mi = minor.toInt();
+
+    if (ma != 0 && ma >=5)
+    {
+      if (mi >=1) res = true;
+    }
   }
 
   return res;

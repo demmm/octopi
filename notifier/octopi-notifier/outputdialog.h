@@ -31,30 +31,36 @@ class PacmanExec;
 class QString;
 class QTextBrowser;
 class QVBoxLayout;
+class QHBoxLayout;
 class QProgressBar;
 class SearchBar;
 class QWidget;
 class QCloseEvent;
 class QKeyEvent;
+class QToolButton;
+class TermWidget;
 
 class OutputDialog : public QDialog
 {
   Q_OBJECT
 
-  Q_PROPERTY(QFrame::Shape frameShape READ frameShape WRITE setFrameShape USER true)
-
 private:
   QTextBrowser *m_textBrowser;
   QProgressBar *m_progressBar;
   QVBoxLayout *m_mainLayout;
+  QHBoxLayout *m_horizLayout;
   PacmanExec *m_pacmanExec;
   SearchBar *m_searchBar;
+  TermWidget *m_console;
+  QString m_listOfAURPackagesToUpgrade;
   bool m_upgradeRunning;
   bool m_debugInfo;
+  bool m_viewAsTextBrowser;
 
-  void init();
+  QAction *m_actionStopTransaction;
+  QToolButton *m_toolButtonStopTransaction;
 
-  void doSystemUpgrade();
+  void initAsTextBrowser();
   void positionTextEditCursorAtEnd();
   bool textInTabOutput(const QString& findText);
   void writeToTabOutput(const QString &msg, TreatURLLinks treatURLLinks = ectn_TREAT_URL_LINK);
@@ -63,11 +69,13 @@ private slots:
   void onPencertange(int percentage);
   void onWriteOutput(const QString &output);
   void pacmanProcessFinished(int exitCode, QProcess::ExitStatus exitStatus);
+  void onCanStopTransaction(bool yesNo);
+  void stopTransaction();
 
   //SearchBar slots
   void onSearchBarTextChanged(QString strToSearch);
   void onSearchBarClosed();
-  void onSearchBarFindNext();
+  void onSearchBarFindNext();  
   void onSearchBarFindPrevious();
 
 protected:
@@ -77,12 +85,23 @@ protected:
 public:
   explicit OutputDialog(QWidget *parent = 0);
   void setDebugMode(bool newValue);
-  QFrame::Shape frameShape();
+  void setListOfAURPackagesToUpgrade(const QString& list);
+  void setViewAsTextBrowser(bool value);
+  void doSystemUpgrade();
 
 public slots:
   void show();
   void reject();
-  void setFrameShape(QFrame::Shape shape);
+
+#ifdef QTERMWIDGET
+  void initAsTermWidget();
+  void doSystemUpgradeInTerminal();
+  void doAURUpgrade();
+  void onExecCommandInTabTerminal(QString command);
+  void onPressAnyKeyToContinue();
+  void onCancelControlKey();
+#endif
+
 };
 
 #endif // OUTPUTDIALOG_H

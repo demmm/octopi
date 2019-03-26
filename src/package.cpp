@@ -34,6 +34,7 @@
 #include <QList>
 #include <QFile>
 #include <QRegularExpression>
+//#include <QDebug>
 
 /*
  * This class abstracts all the relevant package information and services
@@ -68,8 +69,8 @@ QString Package::getBaseName( const QString& p )
 QString Package::makeURLClickable( const QString &s )
 {
 	QString sb = s;
-	QRegExp rx("((ht|f)tp(s?))://(\\S)+[^\"|)|(|.|\\s|\\n]");
-	QRegExp rx1("^|[\\s]+(www\\.)(\\S)+[^\"|)|(|.|\\s|\\n]"); 
+  QRegExp rx("((ht|f)tp(s?))://(\\S)+[^\"|)|(|.|\\s|\\n]");
+  QRegExp rx1("^|[\\s]+(www\\.)(\\S)+[^\"|)|(|.|\\s|\\n]");
   rx.setCaseSensitivity( Qt::CaseInsensitive );
 	rx1.setCaseSensitivity( Qt::CaseInsensitive );
 	int search = 0;
@@ -95,7 +96,7 @@ QString Package::makeURLClickable( const QString &s )
     if (s1[0] == '\n')
       ns += "\n";
 
-		int blanks = s1.count(	QRegExp("^|[\\s]+") );
+		int blanks = s1.count(	QRegularExpression("^|[\\s]+") );
 		for (int i=0; i<blanks; i++) ns += " ";
 
     ns += "<a href=\"http://" + s1.trimmed() + "\">" + s1.trimmed() + "</a>";
@@ -159,8 +160,6 @@ QString Package::makeAnchorOfOptionalDep(const QString &optionalDeps)
   QStringList ldeps = optionalDeps.split("<br>", QString::SkipEmptyParts);
   int colon;
 
-  //teste: isto eh um teste   colon = 5
-
   foreach(QString dep, ldeps)
   {
     colon = dep.indexOf(":");
@@ -169,6 +168,11 @@ QString Package::makeAnchorOfOptionalDep(const QString &optionalDeps)
       name = dep.left(colon).trimmed();
 
       newDep = "<a href=\"goto:" + name + "\">" + name + "</a> " + dep.right(dep.length()-colon);
+      newDeps += newDep + "<br>";
+    }
+    else
+    {
+      newDep = "<a href=\"goto:" + dep + "\">" + dep + "</a> ";
       newDeps += newDep + "<br>";
     }
   }
@@ -197,7 +201,7 @@ QString Package::makeAnchorOfPackage(const QString &packages)
     }
     else
     {
-      int p;
+      int p=-1;
 
       if (dep.contains("<"))
       {
@@ -251,7 +255,7 @@ QSet<QString>* Package::getUnrequiredPackageList()
   if (SettingsManager::hasPacmanBackend())
   {
     QString unrequiredPkgList = UnixCommand::getUnrequiredPackageList();
-    QStringList packageTuples = unrequiredPkgList.split(QRegExp("\\n"), QString::SkipEmptyParts);
+    QStringList packageTuples = unrequiredPkgList.split(QRegularExpression("\\n"), QString::SkipEmptyParts);
 
     foreach(QString packageTuple, packageTuples)
     {
@@ -281,12 +285,13 @@ QSet<QString>* Package::getUnrequiredPackageList()
  */
 QStringList *Package::getOutdatedStringList()
 {
+  //static int counter=1;
   QStringList * res = new QStringList();
 
   if (SettingsManager::hasPacmanBackend())
   {
     QString outPkgList = UnixCommand::getOutdatedPackageList();
-    QStringList packageTuples = outPkgList.split(QRegExp("\\n"), QString::SkipEmptyParts);
+    QStringList packageTuples = outPkgList.split(QRegularExpression("\\n"), QString::SkipEmptyParts);
     QStringList ignorePkgList = UnixCommand::getIgnorePkgsFromPacmanConf();
 
     foreach(QString packageTuple, packageTuples)
@@ -310,18 +315,42 @@ QStringList *Package::getOutdatedStringList()
   else
   {
     QStringList packageTuples = AlpmBackend::getOutdatedList();
-    QStringList ignorePkgList = UnixCommand::getIgnorePkgsFromPacmanConf();
 
     foreach(QString packageTuple, packageTuples)
     {
       res->append(packageTuple);
     }
 
+    //if (counter == 1) res->append("pacman");
     res->sort();
   }
 #endif
 
+  //counter++;
   return res;
+}
+
+/*
+ * Removes color codes from given str parameter
+ */
+QString Package::removeColorCodesFromStr(const QString &str)
+{
+  QString ret = str;
+
+  ret = ret.remove("\033");
+  ret = ret.remove("[1;31m");
+  ret = ret.remove("[1;32m");
+  ret = ret.remove("[1;33m");
+  ret = ret.remove("[1;34m");
+  ret = ret.remove("[1;35m");
+  ret = ret.remove("[1;36m");
+  ret = ret.remove("[1;39m");
+  ret = ret.remove("[m");
+  ret = ret.remove("[0m");
+  ret = ret.remove("[1m");
+  ret = ret.remove("\u001B");
+
+  return ret;
 }
 
 /*
@@ -332,39 +361,42 @@ QStringList *Package::getOutdatedAURStringList()
 {
   QStringList * res = new QStringList();
 
-  if (getForeignRepositoryToolName() != "yaourt" &&
-      getForeignRepositoryToolName() != "pacaur" &&
-      getForeignRepositoryToolName() != "kcp")
+  if (getForeignRepositoryToolName() != ctn_YAOURT_TOOL &&
+      getForeignRepositoryToolName() != ctn_PACAUR_TOOL &&
+      getForeignRepositoryToolName() != ctn_TRIZEN_TOOL &&
+      getForeignRepositoryToolName() != ctn_KCP_TOOL)
     return res;
 
-  QString outPkgList = UnixCommand::getOutdatedAURPackageList();
-  QStringList packageTuples = outPkgList.split(QRegExp("\\n"), QString::SkipEmptyParts);
+  QString outPkgList = removeColorCodesFromStr(UnixCommand::getOutdatedAURPackageList());
+  outPkgList = outPkgList.trimmed();
+
+  //qDebug() << "getOutdatedAURStringList(): return of UnixCommand::getOutdatedAURPackageList(): " << outPkgList;
+
+  QStringList packageTuples = outPkgList.split(QRegularExpression("\\n"), QString::SkipEmptyParts);
+  //foreach (QString outpkg, packageTuples)
+  //  qDebug() << "getOutdatedAURStringList(): pkg in packageTuples: " << outpkg;
+
   QStringList ignorePkgList = UnixCommand::getIgnorePkgsFromPacmanConf();
 
   foreach(QString packageTuple, packageTuples)
   {
     QStringList parts = packageTuple.split(' ', QString::SkipEmptyParts);
     {
-      if (getForeignRepositoryToolName() == "yaourt" ||
-          getForeignRepositoryToolName() == "kcp")
+      if (getForeignRepositoryToolName() == ctn_YAOURT_TOOL ||
+          getForeignRepositoryToolName() == ctn_TRIZEN_TOOL ||
+          getForeignRepositoryToolName() == ctn_KCP_TOOL)
       {
         QString pkgName;
         pkgName = parts[0];
-        pkgName = pkgName.remove("\033");
-        pkgName = pkgName.remove("[1;35m");
-        pkgName = pkgName.remove("[1;36m");
-        pkgName = pkgName.remove("[1;32m");
-        pkgName = pkgName.remove("[m");
-        pkgName = pkgName.remove("[1m");       
 
-        if (getForeignRepositoryToolName() == "yaourt")
+        if (getForeignRepositoryToolName() == ctn_YAOURT_TOOL)
         {
           if (!pkgName.startsWith(StrConstants::getForeignRepositoryTargetPrefix()))
               continue;
         }
 
         if (pkgName.contains(StrConstants::getForeignRepositoryTargetPrefix(), Qt::CaseInsensitive))
-        {
+        {          
           pkgName = pkgName.remove(StrConstants::getForeignRepositoryTargetPrefix());
           //Let's ignore the "IgnorePkg" list of packages...
           if (!ignorePkgList.contains(pkgName))
@@ -372,8 +404,15 @@ QStringList *Package::getOutdatedAURStringList()
             res->append(pkgName); //We only need the package name!
           }
         }
+        else //We have a TRIZEN output
+        {
+          if (!ignorePkgList.contains(pkgName))
+          {
+            res->append(pkgName); //We only need the package name!
+          }
+        }
       }
-      else if (getForeignRepositoryToolName() == "pacaur")
+      else if (getForeignRepositoryToolName() == ctn_PACAUR_TOOL)
       {
         QString pkgName;
         if (parts.count() >= 2)
@@ -382,20 +421,12 @@ QStringList *Package::getOutdatedAURStringList()
             continue;
 
           pkgName = parts[2];
-          pkgName = pkgName.remove("\033");
-          pkgName = pkgName.remove("[1;31m");
-          pkgName = pkgName.remove("[1;32m");
-          pkgName = pkgName.remove("[1;34m");
-          pkgName = pkgName.remove("[1;35m");
-          pkgName = pkgName.remove("[1;39m");
-          pkgName = pkgName.remove("[m");
-          pkgName = pkgName.remove("[0m");
-          pkgName = pkgName.remove("[1m");   
 
           //Let's ignore the "IgnorePkg" list of packages...
           if (!ignorePkgList.contains(pkgName))
           {
             res->append(pkgName); //We only need the package name!
+            //qDebug() << "getOutdatedAURStringList(): outdated AUR package name: " << pkgName;
           }
         }
       }
@@ -412,7 +443,7 @@ QStringList *Package::getOutdatedAURStringList()
 QStringList *Package::getPackageGroups()
 {
   QString packagesFromGroup = UnixCommand::getPackageGroups();
-  QStringList packageTuples = packagesFromGroup.split(QRegExp("\\n"), QString::SkipEmptyParts);
+  QStringList packageTuples = packagesFromGroup.split(QRegularExpression("\\n"), QString::SkipEmptyParts);
   QStringList * res = new QStringList();
 
   foreach(QString packageTuple, packageTuples)
@@ -435,7 +466,7 @@ QStringList *Package::getPackageGroups()
 QStringList *Package::getPackagesOfGroup(const QString &groupName)
 {
   QString packagesFromGroup = UnixCommand::getPackagesFromGroup(groupName);
-  QStringList packageTuples = packagesFromGroup.split(QRegExp("\\n"), QString::SkipEmptyParts);
+  QStringList packageTuples = packagesFromGroup.split(QRegularExpression("\\n"), QString::SkipEmptyParts);
   QStringList * res = new QStringList();
 
   foreach(QString packageTuple, packageTuples)
@@ -454,7 +485,7 @@ QStringList *Package::getPackagesOfGroup(const QString &groupName)
 QList<PackageListData> *Package::getTargetUpgradeList(const QString &pkgName)
 {
   QString targets = UnixCommand::getTargetUpgradeList(pkgName);
-  QStringList packageTuples = targets.split(QRegExp("\\n"), QString::SkipEmptyParts);
+  QStringList packageTuples = targets.split(QRegularExpression("\\n"), QString::SkipEmptyParts);
   QList<PackageListData> *res = new QList<PackageListData>();
   packageTuples.sort();
 
@@ -489,7 +520,7 @@ QList<PackageListData> *Package::getTargetUpgradeList(const QString &pkgName)
 QStringList *Package::getTargetRemovalList(const QString &pkgName, const QString &removeCommand)
 {
   QString targets = UnixCommand::getTargetRemovalList(pkgName, removeCommand);
-  QStringList packageTuples = targets.split(QRegExp("\\n"), QString::SkipEmptyParts);
+  QStringList packageTuples = targets.split(QRegularExpression("\\n"), QString::SkipEmptyParts);
   QStringList * res = new QStringList();
 
   foreach(QString packageTuple, packageTuples)
@@ -511,7 +542,7 @@ QList<PackageListData> *Package::getForeignPackageList()
   if (SettingsManager::hasPacmanBackend())
   {
     QString foreignPkgList = UnixCommand::getForeignPackageList();
-    QStringList packageTuples = foreignPkgList.split(QRegExp("\\n"), QString::SkipEmptyParts);
+    QStringList packageTuples = foreignPkgList.split(QRegularExpression("\\n"), QString::SkipEmptyParts);
 
     foreach(QString packageTuple, packageTuples)
     {
@@ -554,7 +585,7 @@ QList<PackageListData> * Package::getPackageList(const QString &packageName)
     QString pkgName, pkgRepository, pkgVersion, pkgDescription, pkgOutVersion;
     PackageStatus pkgStatus;
     QString pkgList = UnixCommand::getPackageList(packageName);
-    QStringList packageTuples = pkgList.split(QRegExp("\\n"), QString::SkipEmptyParts);
+    QStringList packageTuples = pkgList.split(QRegularExpression("\\n"), QString::SkipEmptyParts);
 
     if(!pkgList.isEmpty())
     {
@@ -720,7 +751,7 @@ QString Package::getAURUrl(const QString &pkgName)
 {
   QString url="";
 
-  if (getForeignRepositoryToolName() != "kcp")
+  if (getForeignRepositoryToolName() != ctn_KCP_TOOL)
   {
     QString pkgInfo = UnixCommand::getAURUrl(pkgName);
     url = getURL(pkgInfo);
@@ -748,7 +779,7 @@ QList<PackageListData> * Package::getAURPackageList(const QString& searchString)
     return res;
 
   QString pkgList = UnixCommand::getAURPackageList(searchString);
-  QStringList packageTuples = pkgList.split(QRegExp("\\n"), QString::SkipEmptyParts);
+  QStringList packageTuples = pkgList.split(QRegularExpression("\\n"), QString::SkipEmptyParts);
 
   pkgDescription = "";
   foreach(QString packageTuple, packageTuples)
@@ -799,19 +830,30 @@ QList<PackageListData> * Package::getAURPackageList(const QString& searchString)
       pkgVersion = parts[1];
 
       QStringList strVotes = parts.filter("(");
+      //Let's see if it's not a Trizen style
+      if (strVotes.isEmpty())
+        strVotes = parts.filter("+]");
+
       pkgVotes = 0;
 
       //Chakra does not have popularity support in CCR
       QString aurTool = getForeignRepositoryToolName();
 
-      if (aurTool != "chaser" && aurTool != "pacaur" && strVotes.count() > 0)
+      if (aurTool == ctn_TRIZEN_TOOL)
+      {
+        if (!strVotes.first().isEmpty())
+          pkgVotes = strVotes.first().replace('[', "").replace(']', "").replace('+', "").toInt();
+        else
+          pkgVotes = 0;
+      }
+      else if (aurTool != ctn_CHASER_TOOL && aurTool != ctn_PACAUR_TOOL && strVotes.count() > 0)
       {
         if (!strVotes.first().isEmpty())
           pkgVotes = strVotes.first().replace('(', "").replace(')', "").toInt();
         else
           pkgVotes = 0;
       }
-      else if (aurTool == "pacaur" && strVotes.count() > 0)
+      else if (aurTool == ctn_PACAUR_TOOL && strVotes.count() > 0)
       {
         if (!strVotes.first().isEmpty())
         {
@@ -825,17 +867,17 @@ QList<PackageListData> * Package::getAURPackageList(const QString& searchString)
       if(packageTuple.indexOf("[installed]") != -1)
       {
         //This is an installed package
-        pkgStatus = ectn_INSTALLED;
+        pkgStatus = ectn_FOREIGN;
         pkgOutVersion = "";
       }
       else if (packageTuple.indexOf("[installed:") != -1)
       {
         //This is an outdated installed package
-        pkgStatus = ectn_OUTDATED;
+        pkgStatus = ectn_FOREIGN_OUTDATED;
 
         int i = packageTuple.indexOf("[installed:");
         pkgOutVersion = packageTuple.mid(i+11);
-        pkgOutVersion = pkgOutVersion.remove(QRegExp("\\].*")).trimmed();
+        pkgOutVersion = pkgOutVersion.remove(QRegularExpression("\\].*")).trimmed();
       }
       else
       {
@@ -909,6 +951,9 @@ QString Package::extractFieldFromInfo(const QString &field, const QString &pkgIn
 
       aux = aux.left(fieldEnd).trimmed();
       aux = aux.replace("\n", "<br>");
+
+      if (aux.indexOf(":") == -1)
+        aux = aux.replace(" ", "");
     }
     else
     {
@@ -993,7 +1038,7 @@ QString Package::getDependsOn(const QString &pkgInfo)
   if (res.isEmpty())
     res = extractFieldFromInfo("Depends on", pkgInfo);
 
-  return res; //extractFieldFromInfo("Depends On", pkgInfo);
+  return res;
 }
 
 /*
@@ -1071,7 +1116,7 @@ double Package::getDownloadSize(const QString &pkgInfo)
   bool isMega = (aux.indexOf("MiB", Qt::CaseInsensitive) != -1);
   //bool isByte = (aux.indexOf(" B", Qt::CaseInsensitive) != -1);
 
-  aux = aux.section(QRegExp("\\s"), 0, 0);
+  aux = aux.section(QRegularExpression("\\s"), 0, 0);
 
   bool ok;
   double res = aux.toDouble(&ok);
@@ -1110,7 +1155,7 @@ double Package::getInstalledSize(const QString &pkgInfo)
   bool isMega = (aux.indexOf("MiB", Qt::CaseInsensitive) != -1);
   //bool isByte = (aux.indexOf(" B", Qt::CaseInsensitive) != -1);
 
-  aux = aux.section(QRegExp("\\s"), 0, 0);
+  aux = aux.section(QRegularExpression("\\s"), 0, 0);
 
   bool ok;
   double res = aux.toDouble(&ok);
@@ -1517,36 +1562,38 @@ QHash<QString, QString> Package::getAUROutdatedPackagesNameVersion()
   QHash<QString, QString> hash;
 
   if(UnixCommand::getLinuxDistro() == ectn_CHAKRA ||
-      (getForeignRepositoryToolName() != "yaourt" &&
-      getForeignRepositoryToolName() != "pacaur" &&
-      getForeignRepositoryToolName() != "kcp"))
+      (getForeignRepositoryToolName() != ctn_YAOURT_TOOL &&
+      getForeignRepositoryToolName() != ctn_PACAUR_TOOL &&
+      getForeignRepositoryToolName() != ctn_TRIZEN_TOOL &&
+      getForeignRepositoryToolName() != ctn_KCP_TOOL))
   {
     return hash;
   }
 
-  QString res = UnixCommand::getAURPackageVersionInformation();
+  QString res = removeColorCodesFromStr(UnixCommand::getOutdatedAURPackageList());
+  res = res.trimmed();
+
+  //qDebug() << "getAUROutdatedPackagesNameVersion(): return of UnixCommand::getOutdatedAURPackageList(): " << res;
+
   QStringList listOfPkgs = res.split("\n", QString::SkipEmptyParts);
+  //foreach (QString outpkg, listOfPkgs)
+  //  qDebug() << "getAUROutdatedPackagesNameVersion(): pkg in listOfPkgs: " << outpkg;
+
   QStringList ignorePkgList = UnixCommand::getIgnorePkgsFromPacmanConf();
 
-  if ((getForeignRepositoryToolName() == "yaourt") ||
-    (getForeignRepositoryToolName() == "kcp"))
+  if ((getForeignRepositoryToolName() == ctn_YAOURT_TOOL) ||
+      (getForeignRepositoryToolName() == ctn_TRIZEN_TOOL) ||
+      (getForeignRepositoryToolName() == ctn_KCP_TOOL))
   {
     foreach (QString line, listOfPkgs)
     {
-      line = line.remove("\033");
-      line = line.remove("[1;35m");
-      line = line.remove("[1;36m");
-      line = line.remove("[1;32m");
-      line = line.remove("[m");
-      line = line.remove("[1m");
-
       if (line.contains(StrConstants::getForeignRepositoryTargetPrefix(), Qt::CaseInsensitive))
       {
         line = line.remove(StrConstants::getForeignRepositoryTargetPrefix());
         QStringList nameVersion = line.split(" ", QString::SkipEmptyParts);
         QString pkgName = nameVersion.at(0);
 
-        if (getForeignRepositoryToolName() == "kcp")
+        if (getForeignRepositoryToolName() == ctn_KCP_TOOL)
         {
           //Let's ignore the "IgnorePkg" list of packages...
           if (!ignorePkgList.contains(pkgName))
@@ -1556,9 +1603,6 @@ QHash<QString, QString> Package::getAUROutdatedPackagesNameVersion()
         }
         else //It's yaourt!
         {
-          if (!pkgName.startsWith(StrConstants::getForeignRepositoryTargetPrefix()))
-            continue;
-
           //Let's ignore the "IgnorePkg" list of packages...
           if (!ignorePkgList.contains(pkgName))
           {
@@ -1569,22 +1613,27 @@ QHash<QString, QString> Package::getAUROutdatedPackagesNameVersion()
           }
         }
       }
+      else //We have TRIZEN output here
+      {
+        QStringList nameVersion = line.split(" ", QString::SkipEmptyParts);
+        QString pkgName = nameVersion.at(0);
+
+        if (pkgName=="::") continue;
+
+        if (!ignorePkgList.contains(pkgName))
+        {
+          if (nameVersion.size() == 2)
+            hash.insert(pkgName, nameVersion.at(1));
+          else if (nameVersion.size() == 4)
+            hash.insert(pkgName, nameVersion.at(3));
+        }
+      }
     }
   }
-  else if (getForeignRepositoryToolName() == "pacaur")
+  else if (getForeignRepositoryToolName() == ctn_PACAUR_TOOL)
   {
     foreach (QString line, listOfPkgs)
     {
-      line = line.remove("\033");
-      line = line.remove("[1;31m");
-      line = line.remove("[1;32m");
-      line = line.remove("[1;34m");
-      line = line.remove("[1;35m");
-      line = line.remove("[1;39m");
-      line = line.remove("[m");
-      line = line.remove("[0m");
-      line = line.remove("[1m");
-
       QStringList sl = line.split(" ", QString::SkipEmptyParts);
 
       if (sl[1] != StrConstants::getForeignPkgRepositoryName())
@@ -1593,6 +1642,7 @@ QHash<QString, QString> Package::getAUROutdatedPackagesNameVersion()
       if (sl.count() >= 6)
       {
         hash.insert(sl.at(2), sl.at(5));
+        //qDebug() << "getAUROutdatedPackagesNameVersion(): adding package " << sl.at(2) << " with new version " << sl.at(5);
       }
     }
   }
@@ -1630,7 +1680,7 @@ QStringList Package::getContents(const QString& pkgName, bool isInstalled)
     }
     if (isInstalled)
     {
-      rsl.replaceInStrings(QRegExp(pkgName + " "), "");
+      rsl.replaceInStrings(QRegularExpression(pkgName + " "), "");
       rsl.sort();
       slResult = rsl;
     }
@@ -1718,24 +1768,36 @@ bool Package::hasPacmanDatabase()
   return answer;
 }
 
-QString Package::getForeignRepositoryToolName()
+/*
+ * Retrives user base package tool name (with any parameters)
+ */
+QString Package::getForeignRepositoryToolNameParam()
 {
-  static bool first=true;
   static QString ret;
 
-  if (first)
-  {
-    if( UnixCommand::getLinuxDistro() == ectn_CHAKRA )
-      ret = QLatin1String( "chaser" );
-    else if (UnixCommand::getLinuxDistro() == ectn_KAOS)
-      ret = QLatin1String( "kcp" );
-    else if (UnixCommand::hasTheExecutable("pacaur"))
-      ret = QLatin1String( "pacaur" );
-    else
-      ret = QLatin1String( "yaourt" );
+  if( UnixCommand::getLinuxDistro() == ectn_CHAKRA )
+    ret = QLatin1String( "chaser" );
+  else if (UnixCommand::getLinuxDistro() == ectn_KAOS)
+    ret = QLatin1String( "kcp" );
+  else // We are talking about ARCH based distros...
+    ret = SettingsManager::getAURTool();
 
-    first = false;
-  }
+  return ret;
+}
+
+/*
+ * Retrives user base package tool name
+ */
+QString Package::getForeignRepositoryToolName()
+{
+  static QString ret;
+
+  if( UnixCommand::getLinuxDistro() == ectn_CHAKRA )
+    ret = QLatin1String( "chaser" );
+  else if (UnixCommand::getLinuxDistro() == ectn_KAOS)
+    ret = QLatin1String( "kcp" );
+  else // We are talking about ARCH based distros...
+    ret = SettingsManager::getAURToolName();
 
   return ret;
 }

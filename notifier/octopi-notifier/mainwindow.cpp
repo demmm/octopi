@@ -34,6 +34,7 @@
 #include <QProcess>
 #include <QMessageBox>
 #include <QDebug>
+#include <QScreen>
 
 #ifdef KSTATUS
   #include <kstatusnotifieritem.h>
@@ -49,6 +50,7 @@
 MainWindow::MainWindow(QWidget *parent) :
     QMainWindow(parent)
 {
+  m_pacmanExec = nullptr;
   m_transactionDialog = nullptr;
   m_debugInfo = false;
   m_optionsDialog = nullptr;
@@ -58,6 +60,7 @@ MainWindow::MainWindow(QWidget *parent) :
   connect(m_pacmanDatabaseSystemWatcher,
           SIGNAL(directoryChanged(QString)), this, SLOT(refreshAppIcon()));
 
+  initActions();
   initSystemTrayIcon();
 }
 
@@ -66,6 +69,45 @@ MainWindow::~MainWindow()
 #ifdef KSTATUS
   delete m_systemTrayIcon;
 #endif
+}
+
+/*
+ * Let's initialize all notifier's actions...
+ */
+void MainWindow::initActions()
+{
+  m_actionExit = new QAction(IconHelper::getIconExit(), tr("Exit"), this);
+  connect(m_actionExit, SIGNAL(triggered()), this, SLOT(exitNotifier()));
+
+  m_actionAbout = new QAction(StrConstants::getHelpAbout(), this);
+  m_actionAbout->setIconVisibleInMenu(true);
+  connect(m_actionAbout, SIGNAL(triggered()), this, SLOT(aboutOctopiNotifier()));
+
+  m_actionOctopi = new QAction(this);
+  m_actionOctopi->setText("Octopi...");
+  connect(m_actionOctopi, SIGNAL(triggered()), this, SLOT(startOctopi()));
+
+  m_actionOptions = new QAction(this);
+  m_actionOptions->setText(StrConstants::getOptions());
+  connect(m_actionOptions, SIGNAL(triggered()), this, SLOT(showOptionsDialog()));
+
+  m_actionSyncDatabase = new QAction(this);
+  m_actionSyncDatabase->setIconVisibleInMenu(true);
+  m_actionSyncDatabase->setText(StrConstants::getSyncDatabase());
+  m_actionSyncDatabase->setIcon(IconHelper::getIconSyncDatabase());
+  connect(m_actionSyncDatabase, SIGNAL(triggered()), this, SLOT(syncDatabase()));
+
+  m_actionSystemUpgrade = new QAction(this);
+  m_actionSystemUpgrade->setIconVisibleInMenu(true);
+  m_actionSystemUpgrade->setText(tr("System upgrade"));
+  m_actionSystemUpgrade->setIcon(IconHelper::getIconSystemUpgrade());
+  connect(m_actionSystemUpgrade, SIGNAL(triggered()), this, SLOT(runOctopiSysUpgrade()));
+
+  m_actionAURUpgrade = new QAction(this);
+  m_actionAURUpgrade->setIconVisibleInMenu(true);
+  m_actionAURUpgrade->setText(tr("System upgrade"));
+  m_actionAURUpgrade->setIcon(IconHelper::getIconForeignGreen());
+  connect(m_actionAURUpgrade, SIGNAL(triggered()), this, SLOT(runOctopiAURUpgrade()));
 }
 
 /*
@@ -95,39 +137,13 @@ void MainWindow::initSystemTrayIcon()
   m_systemTrayIcon->setIcon(m_icon); 
 #endif
 
-  m_actionExit = new QAction(IconHelper::getIconExit(), tr("Exit"), this);
-  connect(m_actionExit, SIGNAL(triggered()), this, SLOT(exitNotifier()));
-
-  m_actionAbout = new QAction(StrConstants::getHelpAbout(), this);
-  m_actionAbout->setIconVisibleInMenu(true);
-  connect(m_actionAbout, SIGNAL(triggered()), this, SLOT(aboutOctopiNotifier()));
-
-  m_actionOctopi = new QAction(this);
-  m_actionOctopi->setText("Octopi...");
-  connect(m_actionOctopi, SIGNAL(triggered()), this, SLOT(startOctopi()));
-
-  m_actionOptions = new QAction(this);
-  m_actionOptions->setText(StrConstants::getOptions());
-  connect(m_actionOptions, SIGNAL(triggered()), this, SLOT(showConfigDialog()));
-
-  m_actionSyncDatabase = new QAction(this);
-  m_actionSyncDatabase->setIconVisibleInMenu(true);
-  m_actionSyncDatabase->setText(StrConstants::getSyncDatabase());
-  m_actionSyncDatabase->setIcon(IconHelper::getIconSyncDatabase());
-  connect(m_actionSyncDatabase, SIGNAL(triggered()), this, SLOT(syncDatabase()));
-
-  m_actionSystemUpgrade = new QAction(this);
-  m_actionSystemUpgrade->setIconVisibleInMenu(true);
-  m_actionSystemUpgrade->setText(tr("System upgrade"));
-  m_actionSystemUpgrade->setIcon(IconHelper::getIconSystemUpgrade());
-  connect(m_actionSystemUpgrade, SIGNAL(triggered()), this, SLOT(runOctopiSysUpgrade()));
-
   m_systemTrayIconMenu = new QMenu( this );
 
   if (UnixCommand::hasTheExecutable("octopi"))
     m_systemTrayIconMenu->addAction(m_actionOctopi);
 
   m_systemTrayIconMenu->addAction(m_actionSyncDatabase);
+  m_systemTrayIconMenu->addAction(m_actionAURUpgrade);
   m_systemTrayIconMenu->addAction(m_actionSystemUpgrade);
   m_systemTrayIconMenu->addSeparator();
   m_systemTrayIconMenu->addAction(m_actionOptions);
@@ -163,14 +179,14 @@ void MainWindow::pacmanHelperTimerTimeout()
 {
   static bool firstTime=true;
 
-  if (!UnixCommand::hasInternetConnection() || m_commandExecuting != ectn_NONE) return;
+  if (m_commandExecuting != ectn_NONE) return;
 
   if (firstTime)
   {
     refreshAppIcon();
 
 #ifdef KSTATUS
-    m_systemTrayIcon->setToolTipTitle("Octopi");
+    m_systemTrayIcon->setToolTipTitle("Octopi Notifier");
 #else
     m_systemTrayIcon->show();
 #endif
@@ -211,7 +227,7 @@ void MainWindow::pacmanHelperTimerTimeout()
            lastCheckTime.isNull() ||
            lastCheckTime.daysTo(now) >= 1)) || (syncTime))
     {
-      syncDatabase();
+      syncDatabase(ectn_auto_sync);
       //Then we set new LastCheckTime...
       SettingsManager::setLastSyncDbTime(now);
     }
@@ -220,7 +236,7 @@ void MainWindow::pacmanHelperTimerTimeout()
   {
     if (lastCheckTime.isNull() || now.addSecs(-(syncDbInterval * 60)) >= lastCheckTime)
     {
-      syncDatabase();
+      syncDatabase(ectn_auto_sync);
       //Then we set new LastCheckTime...
       SettingsManager::setLastSyncDbTime(now);
     }
@@ -244,18 +260,46 @@ void MainWindow::runOctopiSysUpgrade()
 }
 
 /*
+ * Helper to a runOctopi with a call to AUR upgrade
+ */
+void MainWindow::runOctopiAURUpgrade()
+{
+  runOctopi(ectn_AUR_UPGRADE_EXEC_OPT);
+}
+
+/*
  * Shows Octopi About Dialog...
  */
 void MainWindow::aboutOctopiNotifier()
 {
   m_actionAbout->setEnabled(false);
 
-  QString aboutText = "<b>Octopi Notifier - " +
-      StrConstants::getApplicationVersion() + "</b>" + " (" + StrConstants::getQtVersion() + ")<br>";
-  aboutText += "<a href=\"http://octopiproject.wordpress.com/\">http://octopiproject.wordpress.com</a><br><br>";
-  aboutText += "&copy; Alexandre Albuquerque Arnt";
-  QMessageBox::about(this, StrConstants::getHelpAbout(), aboutText);
+  //First we create a fake window to act as about dialog's parent
+  //Otherwise the dialog appears at a random screen point!
+  QMainWindow *fake = new QMainWindow();
+  fake->setWindowIcon(m_icon);
+  fake->setVisible(false);
+  QScreen *sc = QGuiApplication::primaryScreen();
+  fake->setGeometry(sc->geometry());
 
+  QString aboutText = "<b>Octopi Notifier</b><br>";
+  aboutText += StrConstants::getVersion() + ": " + StrConstants::getApplicationVersion() + "</b>" + " - " + StrConstants::getQtVersion() + "<br>";
+  aboutText += StrConstants::getURL() + ": " + "<a href=\"http://octopiproject.wordpress.com/\">http://octopiproject.wordpress.com</a><br>";
+  aboutText += StrConstants::getLicenses() + ": " + QString("<a href=\"http://www.gnu.org/licenses/gpl-2.0.html\">GPL v2</a><br>");
+  aboutText += "&copy; Alexandre Albuquerque Arnt<br><br>";
+
+  aboutText += "<b>Pacman</b><br>";
+  QString pacmanV = UnixCommand::getPacmanVersion();
+  if (pacmanV.at(0) == 'v') pacmanV.remove(0, 1);
+  aboutText += StrConstants::getVersion() + ": " + pacmanV + "<br>";
+  aboutText += StrConstants::getURL() + ": " + "<a href=\"https://www.archlinux.org/pacman/\">https://www.archlinux.org/pacman</a><br>";
+  QDate d = QDate::currentDate();
+  aboutText += "&copy; 2006-%1 Pacman Development Team<br>";
+  aboutText += "&copy; 2002-2006 Judd Vinet";
+  aboutText = aboutText.arg(d.year());
+  QMessageBox::about(fake, StrConstants::getHelpAbout(), aboutText);
+
+  delete fake;
   m_actionAbout->setEnabled(true);
 }
 
@@ -265,6 +309,14 @@ void MainWindow::aboutOctopiNotifier()
 void MainWindow::hideOctopi()
 {  
   QProcess::startDetached("octopi -hide");
+}
+
+/*
+ * Shows Octopi Window if it is hidden
+ */
+void MainWindow::showOctopi()
+{
+  QProcess::startDetached("octopi -show");
 }
 
 /*
@@ -290,6 +342,22 @@ bool MainWindow::_isSUAvailable()
  */
 void MainWindow::doSystemUpgrade()
 {
+  if (!isInternetAvailable()) return;
+
+  //If, for whatever reason, the pacman db is locked, let's ask for lock removal
+  if (PacmanExec::isDatabaseLocked())
+  {
+    int res = QMessageBox::question(this, StrConstants::getConfirmation(),
+                                    StrConstants::getRemovePacmanTransactionLockFileConfirmation(),
+                                    QMessageBox::Yes|QMessageBox::No, QMessageBox::No);
+
+    if (res == QMessageBox::Yes)
+    {
+      PacmanExec::removeDatabaseLock();
+    }
+    else return;
+  }
+
   if (m_transactionDialog != nullptr)
   {
     if (m_transactionDialog->isMinimized())
@@ -299,7 +367,6 @@ void MainWindow::doSystemUpgrade()
     return;
   }
 
-  //Shows a dialog indicating the targets needed to be retrieved and asks for the user's permission.
   QList<PackageListData> * targets = Package::getTargetUpgradeList();
 
   //There are no new updates to install!
@@ -349,7 +416,7 @@ void MainWindow::doSystemUpgrade()
     m_actionSystemUpgrade->setEnabled(false);
 
     OutputDialog *dlg = new OutputDialog(this);
-    dlg->setFrameShape(QFrame::NoFrame);
+    dlg->setViewAsTextBrowser(true);
 
     if (m_debugInfo)
       dlg->setDebugMode(true);
@@ -357,6 +424,7 @@ void MainWindow::doSystemUpgrade()
     QObject::connect(dlg, SIGNAL( finished(int)),
                      this, SLOT( doSystemUpgradeFinished() ));
     dlg->show();
+    dlg->doSystemUpgrade();
   }
   else if(result == QDialogButtonBox::AcceptRole)
   {
@@ -365,24 +433,14 @@ void MainWindow::doSystemUpgrade()
     //If there are no means to run the actions, we must warn!
     if (!_isSUAvailable()) return;
 
-    QStringList lastCommandList;
-    lastCommandList.append("pacman -Su;");
-    lastCommandList.append("echo -e;");
-    lastCommandList.append("read -n1 -p \"" + StrConstants::getPressAnyKey() + "\"");
-
-    m_unixCommand = new UnixCommand(this);
-
-    QObject::connect(m_unixCommand, SIGNAL( finished ( int, QProcess::ExitStatus )),
+    OutputDialog *dlg = new OutputDialog(this);
+    dlg->setViewAsTextBrowser(false);
+    QObject::connect(dlg, SIGNAL( finished(int)),
                      this, SLOT( doSystemUpgradeFinished() ));
 
-    toggleEnableInterface(false);
-    m_actionSystemUpgrade->setEnabled(false);
-
-    if (result == QDialogButtonBox::AcceptRole)
-    {
-      m_commandExecuting = ectn_RUN_SYSTEM_UPGRADE_IN_TERMINAL;
-      m_unixCommand->runCommandInTerminal(lastCommandList);
-    }
+    m_commandExecuting = ectn_RUN_SYSTEM_UPGRADE_IN_TERMINAL;
+    dlg->show();
+    dlg->doSystemUpgradeInTerminal();
   }
   else if (result == QDialogButtonBox::No)
   {   
@@ -393,22 +451,63 @@ void MainWindow::doSystemUpgrade()
 }
 
 /*
- * When system upgrade process is finished...
+ * Calls the OutputDialog with TermWidget to execute the AUR upgrade commands
+ */
+void MainWindow::doAURUpgrade()
+{
+  QString listOfTargets;
+  QString auxPkg;
+
+  foreach(QString pkg, *m_outdatedAURStringList)
+  {
+    auxPkg = pkg;
+    auxPkg.remove("[1;39m");
+    auxPkg.remove("[0m");
+    auxPkg.remove("");
+    listOfTargets += auxPkg + " ";
+  }
+
+#ifndef QTERMWIDGET
+  if (SettingsManager::getTerminal() == ctn_QTERMWIDGET)
+    SettingsManager::setTerminal(ctn_AUTOMATIC);
+#endif
+
+  if (SettingsManager::getTerminal() == ctn_QTERMWIDGET)
+  {
+    OutputDialog *dlg = new OutputDialog(this);
+    dlg->setViewAsTextBrowser(false);
+    dlg->setListOfAURPackagesToUpgrade(listOfTargets);
+
+    QObject::connect(dlg, SIGNAL( finished(int)),
+                     this, SLOT( doSystemUpgradeFinished() ));
+    dlg->show();
+    dlg->doAURUpgrade();
+
+    //QObject::connect(m_pacmanExec, SIGNAL( finished ( int, QProcess::ExitStatus )),
+    //                 this, SLOT( refreshAppIcon()) );
+  }
+  else
+  {
+    m_pacmanExec = new PacmanExec();
+    QObject::connect(m_pacmanExec, SIGNAL( finished ( int, QProcess::ExitStatus )),
+                   this, SLOT( refreshAppIcon()) );
+    m_pacmanExec->doAURUpgrade(listOfTargets);
+  }
+}
+
+/*
+ * When system upgrade process has finished...
  */
 void MainWindow::doSystemUpgradeFinished()
 {
   m_commandExecuting = ectn_NONE;
   refreshAppIcon();
 
-  //Does it still need to upgrade another packages due to SyncFirst issues???
-  if ((m_commandExecuting == ectn_RUN_SYSTEM_UPGRADE_IN_TERMINAL)
-      && m_outdatedStringList->count() > 0)
+  //Does it still need to upgrade another packages due to any issues???
+  if (m_outdatedStringList->count() > 0)
   {
     m_commandExecuting = ectn_NONE;
-    m_unixCommand->removeTemporaryFile();
-
     doSystemUpgrade();
-
     return;
   }
 
@@ -511,10 +610,59 @@ void MainWindow::afterPacmanHelperSyncDatabase()
 }
 
 /*
+ * Checks if Internet connection is up/down
+ */
+bool MainWindow::isInternetAvailable()
+{
+  bool res=true;
+
+  //First we create a fake window to act as about dialog's parent
+  //Otherwise the dialog appears at a random screen point!
+  QMainWindow *fake = new QMainWindow();
+  fake->setWindowIcon(m_icon);
+  fake->setVisible(false);
+  QScreen *sc = QGuiApplication::primaryScreen();
+  fake->setGeometry(sc->geometry());
+
+  //Test if Internet access exists
+  if (!UnixCommand::hasInternetConnection())
+  {
+    QMessageBox::critical(fake, StrConstants::getError(), StrConstants::getInternetUnavailableError());
+    res=false;
+    delete fake;
+  }
+
+  return res;
+}
+
+/*
  * Called every time user selects "Sync databases..." menu option
  */
-void MainWindow::syncDatabase()
+void MainWindow::syncDatabase(SyncDatabase syncDB)
 {
+  if (syncDB == ectn_auto_sync)
+  {
+    if (!UnixCommand::hasInternetConnection()) return;
+  }
+  else if (syncDB == ectn_user_sync)
+  {
+    if (!isInternetAvailable()) return;
+  }
+
+  //If, for whatever reason, the pacman db is locked, let's ask for lock removal
+  if (PacmanExec::isDatabaseLocked())
+  {
+    int res = QMessageBox::question(this, StrConstants::getConfirmation(),
+                                    StrConstants::getRemovePacmanTransactionLockFileConfirmation(),
+                                    QMessageBox::Yes|QMessageBox::No, QMessageBox::No);
+
+    if (res == QMessageBox::Yes)
+    {
+      PacmanExec::removeDatabaseLock();
+    }
+    else return;
+  }
+
   disconnect(m_pacmanDatabaseSystemWatcher,
           SIGNAL(directoryChanged(QString)), this, SLOT(refreshAppIcon()));
 
@@ -575,6 +723,12 @@ void MainWindow::sendNotification(const QString &msg)
  */
 void MainWindow::refreshAppIcon()
 {
+  if (m_pacmanExec != nullptr)
+  {
+    delete m_pacmanExec;
+    m_pacmanExec = nullptr;
+  }
+
   disconnect(m_pacmanDatabaseSystemWatcher,
           SIGNAL(directoryChanged(QString)), this, SLOT(refreshAppIcon()));
 
@@ -582,19 +736,27 @@ void MainWindow::refreshAppIcon()
     qDebug() << "At refreshAppIcon()...";
   m_outdatedStringList = Package::getOutdatedStringList();
 
-  bool hasAURTool = UnixCommand::hasTheExecutable(Package::getForeignRepositoryToolName());
-
-  if (hasAURTool)
+  //We only need to check for outdated AUR pkgs IF we do NOT have outdated standard ones!
+  if (m_outdatedStringList->count() == 0)
   {
-    m_outdatedAURStringList = Package::getOutdatedAURStringList();
+    bool hasAURTool = UnixCommand::hasTheExecutable(Package::getForeignRepositoryToolName());
 
-    for(int c=0; c<m_outdatedAURStringList->count(); ++c)
+    if (hasAURTool && SettingsManager::getSearchOutdatedAURPackages())
     {
-      //If we find an outdated AUR pkg in the official pkg list, let's remove it
-      if (UnixCommand::hasPackage(m_outdatedAURStringList->at(c)))
+      m_outdatedAURStringList = Package::getOutdatedAURStringList();
+
+      for(int c=0; c<m_outdatedAURStringList->count(); ++c)
       {
-        m_outdatedAURStringList->removeAt(c);
+        //If we find an outdated AUR pkg in the official pkg list, let's remove it
+        if (UnixCommand::hasPackage(m_outdatedAURStringList->at(c)))
+        {
+          m_outdatedAURStringList->removeAt(c);
+        }
       }
+    }
+    else
+    {
+      m_outdatedAURStringList = new QStringList();
     }
   }
   else
@@ -608,9 +770,9 @@ void MainWindow::refreshAppIcon()
   if (m_numberOfOutdatedPackages == 0 && m_numberOfOutdatedAURPackages == 0)
   {
     #ifdef KSTATUS
-      m_systemTrayIcon->setToolTipSubTitle("");
+      m_systemTrayIcon->setToolTipSubTitle("Octopi Notifier");
     #else
-      m_systemTrayIcon->setToolTip("");
+      m_systemTrayIcon->setToolTip("Octopi Notifier");
     #endif
   }
   else if (m_numberOfOutdatedPackages > 0)
@@ -662,6 +824,7 @@ void MainWindow::refreshAppIcon()
   {
     if(m_commandExecuting == ectn_NONE)
     {
+      m_actionAURUpgrade->setVisible(false);
       m_actionSystemUpgrade->setEnabled(true);
       m_actionSystemUpgrade->setVisible(true);
     }
@@ -679,6 +842,8 @@ void MainWindow::refreshAppIcon()
   }
   else if(m_outdatedAURStringList->count() > 0) //YELLOW ICON!
   {
+    m_actionAURUpgrade->setEnabled(true);
+    m_actionAURUpgrade->setVisible(true);
     m_actionSystemUpgrade->setVisible(false);
     m_icon = IconHelper::getIconOctopiYellow();
     if (m_debugInfo)
@@ -691,6 +856,7 @@ void MainWindow::refreshAppIcon()
   }
   else //YEAHHH... GREEN ICON!
   {
+    m_actionAURUpgrade->setVisible(false);
     m_actionSystemUpgrade->setVisible(false);
     m_icon = IconHelper::getIconOctopiGreen();
     if (m_debugInfo)
@@ -742,6 +908,10 @@ void MainWindow::execSystemTrayActivated(QSystemTrayIcon::ActivationReason ar)
     {
       hideOctopi();
     }
+    else
+    {
+      runOctopi(ectn_NORMAL_EXEC_OPT);
+    }
 
     break;
   }
@@ -775,6 +945,8 @@ void MainWindow::exitNotifier()
   if (m_debugInfo)
     qDebug() << "At exitNotifier()...";
 
+  //If Octopi was hidden, let's show its window again...
+  if (UnixCommand::isAppRunning("octopi", true)) showOctopi();
   qApp->quit();
 }
 
@@ -785,7 +957,7 @@ void MainWindow::runOctopi(ExecOpt execOptions)
 {
   if (execOptions == ectn_SYSUPGRADE_NOCONFIRM_EXEC_OPT)
   {
-    if (!WMHelper::isKDERunning() && (!WMHelper::isRazorQtRunning()) && (!WMHelper::isLXQTRunning()))
+    if (!WMHelper::isKDERunning() && (!WMHelper::isLXQTRunning()))
     {
       QProcess::startDetached("octopi -sysupgrade-noconfirm -style gtk");
     }
@@ -797,12 +969,14 @@ void MainWindow::runOctopi(ExecOpt execOptions)
   else if (execOptions == ectn_SYSUPGRADE_EXEC_OPT &&
       !UnixCommand::isAppRunning("octopi", true) && m_outdatedStringList->count() > 0)
   {
+    m_actionSystemUpgrade->setEnabled(false);
     doSystemUpgrade();
+    m_actionSystemUpgrade->setEnabled(true);
   }
   else if (execOptions == ectn_SYSUPGRADE_EXEC_OPT &&
       UnixCommand::isAppRunning("octopi", true) && m_outdatedStringList->count() > 0)
   {
-    if (!WMHelper::isKDERunning() && (!WMHelper::isRazorQtRunning()) && (!WMHelper::isLXQTRunning()))
+    if (!WMHelper::isKDERunning() && (!WMHelper::isLXQTRunning()))
     {
       QProcess::startDetached("octopi -sysupgrade -style gtk");
     }
@@ -811,9 +985,19 @@ void MainWindow::runOctopi(ExecOpt execOptions)
       QProcess::startDetached("octopi -sysupgrade");
     }
   }
+  else if (execOptions == ectn_AUR_UPGRADE_EXEC_OPT &&
+      !UnixCommand::isAppRunning("octopi", true) && m_outdatedAURStringList->count() > 0)
+  {
+    doAURUpgrade();
+  }
+  else if (execOptions == ectn_AUR_UPGRADE_EXEC_OPT &&
+      UnixCommand::isAppRunning("octopi", true) && m_outdatedAURStringList->count() > 0)
+  {
+    QProcess::startDetached("octopi -aurupgrade");
+  }
   else if (execOptions == ectn_NORMAL_EXEC_OPT)
   {
-    if (!WMHelper::isKDERunning() && (!WMHelper::isRazorQtRunning()) && (!WMHelper::isLXQTRunning()))
+    if (!WMHelper::isKDERunning() && (!WMHelper::isLXQTRunning()))
     {
       QProcess::startDetached("octopi -style gtk");
     }
@@ -827,16 +1011,14 @@ void MainWindow::runOctopi(ExecOpt execOptions)
 /*
  * Calls the QDialog to set notifier interval
  */
-void MainWindow::showConfigDialog()
+void MainWindow::showOptionsDialog()
 {
   if (m_optionsDialog == nullptr)
   {
     m_optionsDialog = new OptionsDialog(this);
+    connect(m_optionsDialog, SIGNAL(AURToolChanged()), this, SLOT(refreshAppIcon()));
 
-#if QT_VERSION >= 0x050000
     utils::positionWindowAtScreenCenter(m_optionsDialog);
-#endif
-
     m_optionsDialog->exec();
 
     Options::result res = m_optionsDialog->result();

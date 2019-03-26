@@ -42,7 +42,13 @@ public:
 
   void openTerminal(const QString& dirName);
   void openRootTerminal();
+
+  //Executes the given commandList creating a temp transaction file and running it
   void runCommandInTerminal(const QStringList& commandList);
+
+  //Executes the given commandList creating a temp transaction file and calling "octopi-helper -t"
+  void runOctopiHelperInTerminal(const QStringList& commandList);
+
   void runCommandInTerminalAsNormalUser(const QStringList& commandList);
 
   static QStringList getListOfAvailableTerminals();
@@ -52,6 +58,8 @@ signals:
   void finished(int, QProcess::ExitStatus);
   void startedTerminal();
   void finishedTerminal(int, QProcess::ExitStatus);
+
+  void commandToExecInQTermWidget(QString);
 };
 
 #endif // TERMINAL_H

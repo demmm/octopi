@@ -43,11 +43,13 @@ QFutureWatcher<QSet<QString> *> g_fwUnrequiredPacman;
 QFutureWatcher<PackageInfoData> g_fwKCPInformation;
 QFutureWatcher<QStringList *> g_fwOutdatedPkgStringList;
 QFutureWatcher<QStringList *> g_fwOutdatedAURStringList;
+QFutureWatcher<QByteArray> g_fwCommandToExecute;
+QFutureWatcher<QString> g_fwGenerateSysInfo;
 
 /*
  * Given a packageName, returns its description
  */
-QString showPackageInfo(QString pkgName)
+QString showPackageDescription(QString pkgName)
 {
   MainWindow *mw = MainWindow::returnMainWindow();
   const PackageRepository::PackageData*const package = mw->getFirstPackageFromRepo(pkgName);
@@ -224,4 +226,35 @@ QStringList *getOutdatedAURStringList()
   QStringList *res = Package::getOutdatedAURStringList();
 
   return res;
+}
+
+/*
+ * Executes given cmd with QProcess class
+ */
+QByteArray execCommandInAnotherThread(QString cmd)
+{
+  return UnixCommand::execCommandAsNormalUserExt(cmd);
+}
+
+/*
+ * Generates SysInfo file and paste it to ptpb site
+ *
+ * Returns a clickable URL
+ */
+QString generateSysInfo(QByteArray contents)
+{
+  QTime time = QTime::currentTime();
+  qsrand(time.minute() + time.second() + time.msec());
+  QFile *tempFile = new QFile(ctn_TEMP_ACTIONS_FILE + QString::number(qrand()));
+  tempFile->open(QIODevice::ReadWrite|QIODevice::Text);
+  tempFile->setPermissions(QFile::Permissions(QFile::ExeOwner|QFile::ReadOwner));
+  tempFile->write(contents);
+  tempFile->flush();
+  tempFile->close();
+
+  //Assign collected logs (contents) to a 24h ptpb paste lifetime
+  QString ptpb = UnixCommand::getCommandOutput("curl -F sunset=86400 -F c=@- https://ptpb.pw/", tempFile->fileName());
+  //QString ptpb = UnixCommand::getCommandOutput("curl -F sunset=10 -F c=@- https://ptpb.pw/", tempFile->fileName());
+  ptpb.replace("\n", "\n<br>");
+  return ptpb;
 }

@@ -32,6 +32,7 @@ HEADERS +=  cachecleaner.h \
 SOURCES +=  main.cpp \
             cachecleaner.cpp \
             packagegroupmodel.cpp \
+            ../src/strconstants.cpp \
             ../src/unixcommand.cpp \
             ../src/wmhelper.cpp \
             ../src/terminal.cpp \
@@ -67,6 +68,8 @@ TRANSLATIONS += resources/translations/octopi_cachecleaner_pt_BR.ts \
     resources/translations/octopi_cachecleaner_da.ts \
     resources/translations/octopi_cachecleaner_cs.ts \
     resources/translations/octopi_cachecleaner_he.ts \
+    resources/translations/octopi_cachecleaner_hi.ts \
+    resources/translations/octopi_cachecleaner_hi_IN.ts \
     resources/translations/octopi_cachecleaner_lt.ts \
     resources/translations/octopi_cachecleaner_nb.ts \
     resources/translations/octopi_cachecleaner_sr@latin.ts \

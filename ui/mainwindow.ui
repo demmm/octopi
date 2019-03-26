@@ -38,15 +38,15 @@
      <number>0</number>
     </property>
     <item row="0" column="0">
-     <widget class="QSplitter" name="splitterHorizontal">
+     <widget class="QSplitter" name="splitterVertical">
       <property name="orientation">
-       <enum>Qt::Vertical</enum>
+       <enum>Qt::Horizontal</enum>
       </property>
-      <widget class="QSplitter" name="splitterVertical">
+      <widget class="QSplitter" name="splitterHorizontal">
        <property name="orientation">
-        <enum>Qt::Horizontal</enum>
+        <enum>Qt::Vertical</enum>
        </property>
-       <widget class="QTreeView" name="tvPackages">
+       <widget class="PackageTreeView" name="tvPackages">
         <property name="sizePolicy">
          <sizepolicy hsizetype="Expanding" vsizetype="MinimumExpanding">
           <horstretch>0</horstretch>
@@ -75,56 +75,56 @@
          <number>20</number>
         </property>
        </widget>
-       <widget class="QTreeWidget" name="twGroups">
-        <property name="maximumSize">
+       <widget class="QTabWidget" name="twProperties">
+        <property name="sizePolicy">
+         <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+          <horstretch>0</horstretch>
+          <verstretch>0</verstretch>
+         </sizepolicy>
+        </property>
+        <property name="minimumSize">
          <size>
-          <width>265</width>
-          <height>16777215</height>
+          <width>0</width>
+          <height>235</height>
          </size>
         </property>
-        <column>
-         <property name="text">
-          <string notr="true">1</string>
-         </property>
-        </column>
+        <property name="currentIndex">
+         <number>0</number>
+        </property>
+        <widget class="QWidget" name="tabInfo">
+         <attribute name="title">
+          <string>Info</string>
+         </attribute>
+        </widget>
+        <widget class="QWidget" name="tbFiles">
+         <attribute name="title">
+          <string>Files</string>
+         </attribute>
+        </widget>
+        <widget class="QWidget" name="tabTransaction">
+         <attribute name="title">
+          <string>Transaction</string>
+         </attribute>
+        </widget>
+        <widget class="QWidget" name="tabOutput">
+         <attribute name="title">
+          <string>Output</string>
+         </attribute>
+        </widget>
        </widget>
       </widget>
-      <widget class="QTabWidget" name="twProperties">
-       <property name="sizePolicy">
-        <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
-         <horstretch>0</horstretch>
-         <verstretch>0</verstretch>
-        </sizepolicy>
-       </property>
-       <property name="minimumSize">
+      <widget class="QTreeWidget" name="twGroups">
+       <property name="maximumSize">
         <size>
-         <width>0</width>
-         <height>235</height>
+         <width>265</width>
+         <height>16777215</height>
         </size>
        </property>
-       <property name="currentIndex">
-        <number>0</number>
-       </property>
-       <widget class="QWidget" name="tabInfo">
-        <attribute name="title">
-         <string>Info</string>
-        </attribute>
-       </widget>
-       <widget class="QWidget" name="tbFiles">
-        <attribute name="title">
-         <string>Files</string>
-        </attribute>
-       </widget>
-       <widget class="QWidget" name="tabTransaction">
-        <attribute name="title">
-         <string>Transaction</string>
-        </attribute>
-       </widget>
-       <widget class="QWidget" name="tabOutput">
-        <attribute name="title">
-         <string>Output</string>
-        </attribute>
-       </widget>
+       <column>
+        <property name="text">
+         <string notr="true">1</string>
+        </property>
+       </column>
       </widget>
      </widget>
     </item>
@@ -136,7 +136,7 @@
      <x>0</x>
      <y>0</y>
      <width>552</width>
-     <height>30</height>
+     <height>22</height>
     </rect>
    </property>
    <property name="contextMenuPolicy">
@@ -183,10 +183,11 @@
     <property name="title">
      <string>Search</string>
     </property>
-    <addaction name="actionSearchByName"/>
     <addaction name="actionSearchByDescription"/>
-    <addaction name="separator"/>
     <addaction name="actionSearchByFile"/>
+    <addaction name="actionSearchByName"/>
+    <addaction name="separator"/>
+    <addaction name="actionUseInstantSearch"/>
    </widget>
    <widget class="QMenu" name="menuTools">
     <property name="title">
@@ -300,7 +301,7 @@
     <string>System upgrade</string>
    </property>
    <property name="shortcut">
-    <string>Ctrl+U</string>
+    <string>Ctrl+P</string>
    </property>
   </action>
   <action name="actionInstall">
@@ -579,8 +580,23 @@
     <string>By file</string>
    </property>
   </action>
+  <action name="actionUseInstantSearch">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>Use Instant Search</string>
+   </property>
+  </action>
  </widget>
  <layoutdefault spacing="6" margin="11"/>
+ <customwidgets>
+  <customwidget>
+   <class>PackageTreeView</class>
+   <extends>QTreeView</extends>
+   <header>src/packagetreeview.h</header>
+  </customwidget>
+ </customwidgets>
  <tabstops>
   <tabstop>tvPackages</tabstop>
   <tabstop>twProperties</tabstop>

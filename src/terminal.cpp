@@ -21,6 +21,7 @@
 #include "terminal.h"
 #include "wmhelper.h"
 #include "unixcommand.h"
+#include "strconstants.h"
 
 #include <QApplication>
 #include <QProcess>
@@ -34,6 +35,8 @@
 Terminal::Terminal(QObject *parent, const QString &selectedTerminal) : QObject(parent)
 {
   m_process = new QProcess(parent);
+  m_process->setInputChannelMode(QProcess::ForwardedInputChannel);
+  m_process->setProcessChannelMode(QProcess::ForwardedChannels);
   m_processWrapper = new utils::ProcessWrapper(parent);
 
   //Make the needed signal propagations...
@@ -203,7 +206,7 @@ void Terminal::openTerminal(const QString &dirName)
  */
 void Terminal::openRootTerminal()
 {
-  if (m_selectedTerminal == ctn_AUTOMATIC)
+  if (m_selectedTerminal == ctn_AUTOMATIC || m_selectedTerminal == ctn_QTERMWIDGET)
   {
     if (UnixCommand::getLinuxDistro() == ectn_MOOOSLINUX && UnixCommand::hasTheExecutable(ctn_RXVT_TERMINAL))
     {
@@ -341,9 +344,20 @@ void Terminal::runCommandInTerminal(const QStringList &commandList)
 {
   QFile *ftemp = UnixCommand::getTemporaryFile();
   QTextStream out(ftemp);
+  bool removedLines = false;
 
   foreach(QString line, commandList)
+  {
+    if ((line.contains("echo -e") || line.contains("read -n 1")) && m_selectedTerminal == ctn_QTERMWIDGET)
+    {
+      removedLines = true;
+      continue;
+    }
+
     out << line;
+  }
+
+  if (removedLines) out << "echo \"" << StrConstants::getPressAnyKey() + "\"";
 
   out.flush();
   ftemp->close();
@@ -424,6 +438,12 @@ void Terminal::runCommandInTerminal(const QStringList &commandList)
   }
   else //User has chosen his own terminal...
   {
+    if (m_selectedTerminal == ctn_QTERMWIDGET)
+    {
+      m_process->close();
+      QString cmd = UnixCommand::getShell() + " -c \"" + ftemp->fileName() + "\"";
+      emit commandToExecInQTermWidget(cmd);
+    }
     if (m_selectedTerminal == ctn_RXVT_TERMINAL)
     {
       QString cmd =
@@ -482,15 +502,187 @@ void Terminal::runCommandInTerminal(const QStringList &commandList)
 }
 
 /*
+ * Executes the given command list with root credentials using "octopi-helper -t"
+ */
+void Terminal::runOctopiHelperInTerminal(const QStringList &commandList)
+{
+  QFile *ftemp = UnixCommand::getTemporaryFile();
+  QTextStream out(ftemp);
+  bool removedLines = false;
+
+  foreach(QString line, commandList)
+  {
+    if ((line.contains("echo -e") || line.contains("read -n 1")) && m_selectedTerminal == ctn_QTERMWIDGET)
+    {
+      removedLines = true;
+      continue;
+    }
+
+    out << line << "\n";
+  }
+
+  if (removedLines) out << "echo \"" << StrConstants::getPressAnyKey() + "\"";
+
+  out.flush();
+  ftemp->close();
+
+  QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+  env.remove("LANG");
+  env.remove("LC_MESSAGES");
+  env.insert("LANG", QLocale::system().name() + ".UTF-8");
+  env.insert("LC_MESSAGES", QLocale::system().name() + ".UTF-8");
+  m_process->setProcessEnvironment(env);
+
+  QString suCommand = WMHelper::getSUCommand();
+  QString commandToRun = ctn_OCTOPI_HELPER + " -t";
+
+  if (m_selectedTerminal == ctn_AUTOMATIC)
+  {
+    if (UnixCommand::getLinuxDistro() == ectn_MOOOSLINUX && UnixCommand::hasTheExecutable(ctn_RXVT_TERMINAL))
+    {
+      QString cmd =
+          suCommand + " \"" + ctn_RXVT_TERMINAL + " -title pacman -name pacman -e " + UnixCommand::getShell() + " -c " + commandToRun + "\"";
+
+      m_process->start(cmd);
+    }
+    else if(WMHelper::isXFCERunning() && UnixCommand::hasTheExecutable(ctn_XFCE_TERMINAL)){
+      QString cmd = suCommand + " \"" + ctn_XFCE_TERMINAL + " -e \'" + UnixCommand::getShell() + " -c " + commandToRun + "'\"";
+      m_process->start(cmd);
+    }
+    else if (WMHelper::isKDERunning() && UnixCommand::hasTheExecutable(ctn_KDE_TERMINAL)){
+      QString cmd;
+
+      if (UnixCommand::isRootRunning())
+      {
+        cmd = "dbus-launch " + ctn_KDE_TERMINAL + " -e " + UnixCommand::getShell() + " " + commandToRun;
+      }
+      else
+      {
+        cmd = suCommand + " \"" + ctn_KDE_TERMINAL + " -e " + UnixCommand::getShell() + " "  + commandToRun + "\"";
+      }
+
+      m_process->start(cmd);
+    }
+    else if (WMHelper::isTDERunning() && UnixCommand::hasTheExecutable(ctn_TDE_TERMINAL)){
+      QString cmd = suCommand + " \"" + ctn_TDE_TERMINAL + " --nofork -e " + UnixCommand::getShell() + " -c " + commandToRun + "\"";
+      m_process->start(cmd);
+    }
+    else if (WMHelper::isLXDERunning() && UnixCommand::hasTheExecutable(ctn_LXDE_TERMINAL)){
+      QString cmd = suCommand + " \"" + ctn_LXDE_TERMINAL + " -e \'" + UnixCommand::getShell() + " -c " + commandToRun + "'\"";
+      m_process->start(cmd);
+    }
+    else if (WMHelper::isMATERunning() && UnixCommand::hasTheExecutable(ctn_MATE_TERMINAL)){
+      QString cmd = suCommand + " \"" + ctn_MATE_TERMINAL + " -e \'" + UnixCommand::getShell() + " -c " + commandToRun + "'\"";
+      m_process->start(cmd);
+    }
+    else if (WMHelper::isCinnamonRunning() && UnixCommand::hasTheExecutable(ctn_CINNAMON_TERMINAL)){
+      QString cmd = suCommand + " \"" + ctn_CINNAMON_TERMINAL + " -e \'" + UnixCommand::getShell() + " -c " + commandToRun + "'\"";
+      m_process->start(cmd);
+    }
+    else if (WMHelper::isLXQTRunning() && UnixCommand::hasTheExecutable(ctn_LXQT_TERMINAL)){
+      QString cmd = suCommand + " \"" + ctn_LXQT_TERMINAL + " -e \'" + UnixCommand::getShell() + " -c " + commandToRun + "'\"";
+      m_process->start(cmd);
+    }
+    else if (UnixCommand::hasTheExecutable(ctn_PEK_TERMINAL)){
+      QString cmd = suCommand + " \"" + ctn_PEK_TERMINAL + " -e \'" + UnixCommand::getShell() + " -c " + commandToRun + "'\"";
+      m_process->start(cmd);
+    }
+    else if (UnixCommand::hasTheExecutable(ctn_XFCE_TERMINAL)){
+      QString cmd = suCommand + " \"" + ctn_XFCE_TERMINAL + " -e \'" + UnixCommand::getShell() + " -c " + commandToRun + "'\"";
+      m_process->start(cmd);
+    }
+    else if (UnixCommand::hasTheExecutable(ctn_LXDE_TERMINAL)){
+      QString cmd = suCommand + " \"" + ctn_LXDE_TERMINAL + " -e \'" + UnixCommand::getShell() + " -c " + commandToRun + "'\"";
+      m_process->start(cmd);
+    }
+    else if (UnixCommand::hasTheExecutable(ctn_XTERM)){
+      QString cmd = suCommand + " \"" + ctn_XTERM +
+          " -fn \"*-fixed-*-*-*-18-*\" -fg White -bg Black -title xterm -e \'" + UnixCommand::getShell() + " -c " + commandToRun + "'\"";
+      m_process->start(cmd);
+    }
+  }
+  else //User has chosen his own terminal...
+  {
+    if (m_selectedTerminal == ctn_QTERMWIDGET)
+    {
+      m_process->close();
+      QString cmd = "sudo " + commandToRun;
+      emit commandToExecInQTermWidget(cmd);
+    }
+    else if (m_selectedTerminal == ctn_RXVT_TERMINAL)
+    {
+      QString cmd =
+          suCommand + " \"" + ctn_RXVT_TERMINAL + " -title pacman -name pacman -e " + UnixCommand::getShell() + " -c " + commandToRun + "\"";
+
+      m_process->start(cmd);
+    }
+    else if(m_selectedTerminal == ctn_XFCE_TERMINAL){
+      QString cmd = suCommand + " \"" + ctn_XFCE_TERMINAL + " -e \'" + UnixCommand::getShell() + " -c " + commandToRun + "'\"";
+      m_process->start(cmd);
+    }
+    else if (m_selectedTerminal == ctn_KDE_TERMINAL){
+      QString cmd;
+
+      if (UnixCommand::isRootRunning())
+      {
+        cmd = "dbus-launch " + ctn_KDE_TERMINAL + " -e " + UnixCommand::getShell() + " -c " + commandToRun;
+      }
+      else
+      {
+        cmd = suCommand + " \"" + ctn_KDE_TERMINAL + " -e " + UnixCommand::getShell() + " -c " + commandToRun + "\"";
+      }
+
+      m_process->start(cmd);
+    }
+    else if (m_selectedTerminal == ctn_TDE_TERMINAL){
+      QString cmd = suCommand + " \"" + ctn_TDE_TERMINAL + " --nofork -e " + UnixCommand::getShell() + " -c " + commandToRun + "\"";
+      m_process->start(cmd);
+    }
+    else if (m_selectedTerminal == ctn_PEK_TERMINAL){
+      QString cmd = suCommand + " \"" + ctn_PEK_TERMINAL + " -e \'" + UnixCommand::getShell() + " -c " + commandToRun + "'\"";
+      m_process->start(cmd);
+    }
+    else if (m_selectedTerminal == ctn_LXDE_TERMINAL){
+      QString cmd = suCommand + " \"" + ctn_LXDE_TERMINAL + " -e \'" + UnixCommand::getShell() + " -c " + commandToRun + "'\"";
+      m_process->start(cmd);
+    }
+    else if (m_selectedTerminal == ctn_MATE_TERMINAL){
+      QString cmd = suCommand + " \"" + ctn_MATE_TERMINAL + " -e \'" + UnixCommand::getShell() + " -c " + commandToRun + "'\"";
+      m_process->start(cmd);
+    }
+    else if (m_selectedTerminal == ctn_CINNAMON_TERMINAL){
+      QString cmd = suCommand + " \"" + ctn_CINNAMON_TERMINAL + " -e \'" + commandToRun + "'\"";
+      m_process->start(cmd);
+    }
+    else if (m_selectedTerminal == ctn_LXQT_TERMINAL){
+      QString cmd = suCommand + " " + ctn_LXQT_TERMINAL + " -e '" + commandToRun + "'";
+      m_process->start(cmd);
+    }
+    else if (m_selectedTerminal == ctn_XTERM){
+      QString cmd = suCommand + " \"" + ctn_XTERM +
+          " -fn \"*-fixed-*-*-*-18-*\" -fg White -bg Black -title xterm -e \'" + UnixCommand::getShell() + " -c " + commandToRun + "'\"";
+      m_process->start(cmd);
+    }
+  }
+}
+
+/*
  * Executes the given command list as normal user
  */
 void Terminal::runCommandInTerminalAsNormalUser(const QStringList &commandList)
 {
   QFile *ftemp = UnixCommand::getTemporaryFile();
   QTextStream out(ftemp);
+  bool removedLines = false;
 
   foreach(QString line, commandList)
   {
+    if ((line.contains("echo -e") || line.contains("read -n 1")) && m_selectedTerminal == ctn_QTERMWIDGET)
+    {
+      removedLines = true;
+      continue;
+    }
+
     //We must remove the "ccr/" prefix in Chakra, cos this will not work
     if(line.contains("ccr/"))
     {
@@ -499,6 +691,8 @@ void Terminal::runCommandInTerminalAsNormalUser(const QStringList &commandList)
 
     out << line;
   }
+
+  if (removedLines) out << "echo \"" << StrConstants::getPressAnyKey() + "\"";
 
   out.flush();
   ftemp->close();
@@ -561,7 +755,13 @@ void Terminal::runCommandInTerminalAsNormalUser(const QStringList &commandList)
   }
   else //User has chosen his own terminal...
   {
-    if (m_selectedTerminal == ctn_RXVT_TERMINAL)
+    if (m_selectedTerminal == ctn_QTERMWIDGET)
+    {
+      m_process->close();
+      QString cmd = UnixCommand::getShell() + " -c \"" + ftemp->fileName() + "\"";
+      emit commandToExecInQTermWidget(cmd);
+    }
+    else if (m_selectedTerminal == ctn_RXVT_TERMINAL)
     {
       if (UnixCommand::isAppRunning("urxvtd"))
       {
@@ -643,6 +843,10 @@ QStringList Terminal::getListOfAvailableTerminals()
 
   if (UnixCommand::hasTheExecutable(ctn_XTERM))
     res.append(ctn_XTERM);
+
+#ifdef QTERMWIDGET
+  res.append(ctn_QTERMWIDGET);
+#endif
 
   res.removeDuplicates();
   res.sort();

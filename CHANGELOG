@@ -1,12 +1,57 @@
-0.9.0 (dev)
-  Added an options dialog to Octopi and Notifier.
+0.9.1 (dev)
+  Changed ptpb SysInfo logic to show more parameters and keep it remotely for 24 hours.
+  Left click on package icon in package list brings context menu.
+  Added "Info" option in package list context menu.
+  Added CondresOS news support.
+  Added support for sudo (and NOPASSWD) executing thru new octopi-helper subproject.
+  Added option to exit Octopi while a transaction is already running.
+  BugFix: Some packages were not displaying Optional Deps at Info tab.
+  BugFix: Huge delay when scrolling thru large package list.
+  BugFix: OptionsDialog was not saving AUR settings if tab changed before clicking OK.
+  BugFix: Changed Manjaro news url.
+  BugFix: If user chooses QTermWidget as his terminal, "Open root terminal" didn't work.
+  BugFix: Notifier checked for available internet connection too early with an error dialog box.
+  BugFix: Changed command string to Reinstall/Update when package is already installed or outdated.
+  BugFix: Clear filter line edit when navigating thru package anchors at Info tab.
+  BugFix: Info and Files tabs were not showing any info automaticaly when switching between 
+	foreign tool/pacman lists.
+
+0.9.0
+  Parser changes: added counter for processed packages.  
+  Group pane now spans all window's height.
+  SysInfo now uses ptpb site and does not block interface.
+  Added Trizen (AUR tool) support.
+  Added Terminal tab if user compiles project with libqtermwidget5 support.
+  Added Terminal dialog in Notifier (AUR update) if user compiles project with 
+	libqtermwidget5 support.
+  Added an Options dialog to Octopi and Notifier.
+  Added button after progressbar to stop current running transaction.
+  Added configurable "--noconfirm" and "--noedit" options to pacaur and "--noconfirm" to yaourt.
+  Added "Search/Use Instant Search" toggle.
   Added slovenian translation (thanks to the translation crew).
+  Added support fo drag pacman packages to Octopi's mainwindow so they can be installed.
   Added "Install Reason" field at Info tab.
   Added support for ALPM utils lib (thanks to guinux, from Pamac project). So, now it's possible to 
 	show "Download Size" in package list.
   Added link support in all Info tab package lists.
-  Find line edit is always focused when the program starts.
-  Prevent the user to install partial upgrades in his system (some of the outdated packages). 
+  Added option to upgrade outdated foreign packages from Octopi Notifier.
+  Added Hindi translation (thanks to Panwar108).
+  Name of AUR package in Info tab act as link to its site at https://aur.archlinux.org.
+  Search line edit is always focused when the program starts.
+  Prevent user to install partial upgrades in his system (ex: only some of the outdated packages).
+  Do NOT clear search string when switching between AUR/pacman.
+  BugFix: If threre are updated News after a synchronization, let's goto the News Tab.
+  BugFix: Remove only Octopi tools related temporary files (qtsingleapp*).
+  BugFix: Do not let program display an avalanche of internet related errors.
+  BugFix: Exec internet tests before some commands in Octopi and Notifier.
+  BugFix: Parser was not outputing repository errors when syncinc.
+  BugFix: repoeditor now runs as normal user and asks for root password on save.
+  BugFix: If Notifier hid Octopi and was closed, Octopi's window would stay hidden.
+  BugFix: Notifier's about dialog was never screen centered.
+  BugFix: When no AUR helper exists, the group of packages panel stayed disabled.
+  BugFix: Cache Cleaner now saves its window geometry.
+  BugFix: Infinite wait cursor in Cache Cleaner when user press Enter for more than two
+	seconds in the spin boxes.
   BugFix: Some pkg download/installed sizes were not showing properly at Info tab.
   BugFix: If we find an outdated AUR pkg in the official pkg list, we remove it.
   BugFix: Install local packages did not work with space separated paths 
@@ -21,6 +66,11 @@
   BugFix: searchlineedit font fix.
   BugFix: 'yaourt' and 'pacaur' no longer honor "-a" option when querying outdated 
 	foreign packages.
+  BugFix: System upgrade shortcut changed to "ctrl+P" as "ctrl+U" is used to cut text in 
+	QLineEdit widgets.
+  BugFix: When user selected another search option, line edit was not being cleared.
+  BugFix: Disable alien icon while in transaction.
+  BugFix: Do not ask twice for password if a pacman lck file exists.
 
 0.8.1
   BugFix: Updated CHAKRA RSS site (thanks to s8321414).

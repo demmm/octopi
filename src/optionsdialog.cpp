@@ -24,6 +24,7 @@
 #include "wmhelper.h"
 #include "strconstants.h"
 #include "terminal.h"
+#include "uihelper.h"
 
 #include <QPushButton>
 #include <QFile>
@@ -79,6 +80,17 @@ void OptionsDialog::currentTabChanged(int tabIndex){
     {
       twTerminal->setCurrentItem(l.at(0));
       twTerminal->scrollToItem(l.at(0));
+    }
+  }
+  else if (tabWidget->tabText(tabIndex) == tr("SU tool"))
+  {
+    twSUTool->setFocus();
+    QList<QTableWidgetItem*> l = twSUTool->findItems(SettingsManager::readSUToolValue(), Qt::MatchExactly);
+
+    if (l.count() == 1)
+    {
+      twSUTool->setCurrentItem(l.at(0));
+      twSUTool->scrollToItem(l.at(0));
     }
   }
 }
@@ -174,19 +186,27 @@ void OptionsDialog::initialize(){
   m_iconHasChanged = false;
 
   initButtonBox();
+  initGeneralTab();
+  initAURTab();
+
+#ifdef ALPM_BACKEND
   initBackendTab();
+#else
+  removeTabByName(tr("Backend"));
+#endif
+
   initIconTab();
+  initSUToolTab();
   initSynchronizationTab();
   initTerminalTab();
 
   if (m_calledByOctopi)
   {
-    tabWidget->removeTab(2);
+    removeTabByName(tr("Synchronization"));
   }
   else
   {
-    tabWidget->removeTab(0);
-    tabWidget->removeTab(2);
+    removeTabByName(tr("Backend"));
   }
 
   tabWidget->setCurrentIndex(0);
@@ -195,6 +215,97 @@ void OptionsDialog::initialize(){
 void OptionsDialog::initButtonBox(){
   buttonBox->button(QDialogButtonBox::Ok)->setText(tr("Ok"));
   buttonBox->button(QDialogButtonBox::Cancel)->setText(tr("Cancel"));
+}
+
+/*
+ * Initializes General tab
+ */
+void OptionsDialog::initGeneralTab()
+{
+  cbShowPackageNumbersOutput->setChecked(SettingsManager::getShowPackageNumbersOutput());
+  cbShowStopTransaction->setChecked(SettingsManager::getShowStopTransaction());
+}
+
+/*
+ * Initializes available AUR tools (if any)
+ */
+void OptionsDialog::initAURTab()
+{
+  bool pacaurTool=false;
+  bool yaourtTool=false;
+  bool trizenTool=false;
+
+  if ((UnixCommand::getLinuxDistro() != ectn_KAOS) &&
+    (UnixCommand::getLinuxDistro() != ectn_CHAKRA &&
+     UnixCommand::getLinuxDistro() != ectn_PARABOLA))
+  {
+    if (UnixCommand::hasTheExecutable(ctn_PACAUR_TOOL))
+      pacaurTool=true;
+    if (UnixCommand::hasTheExecutable(ctn_YAOURT_TOOL))
+      yaourtTool=true;
+    if (UnixCommand::hasTheExecutable(ctn_TRIZEN_TOOL))
+      trizenTool=true;
+  }
+
+  //if (!pacaurTool && !yaourtTool && !trizenTool)
+  if (UnixCommand::getLinuxDistro() == ectn_KAOS)
+  {
+    removeTabByName("AUR");
+  }
+  else
+  {
+    if (!pacaurTool)
+    {
+      rbPacaur->setEnabled(false);
+      cbPacaurNoConfirm->setEnabled(false);
+      cbPacaurNoEdit->setEnabled(false);
+    }
+    if (!yaourtTool)
+    {
+      rbYaourt->setEnabled(false);
+      cbYaourtNoConfirm->setEnabled(false);
+    }
+    if (!trizenTool)
+    {
+      rbTrizen->setEnabled(false);
+      cbTrizenNoConfirm->setEnabled(false);
+      cbTrizenNoEdit->setEnabled(false);
+    }
+
+    if (!pacaurTool && !yaourtTool && !trizenTool)
+    {
+      cbSearchOutdatedAURPackages->setEnabled(false);
+    }
+
+    if (SettingsManager::getAURToolName() == ctn_PACAUR_TOOL)
+      rbPacaur->setChecked(true);
+    else if (SettingsManager::getAURToolName() == ctn_YAOURT_TOOL)
+      rbYaourt->setChecked(true);
+    else if (SettingsManager::getAURToolName() == ctn_TRIZEN_TOOL)
+      rbTrizen->setChecked(true);
+    else if (SettingsManager::getAURToolName() == ctn_NO_AUR_TOOL)
+    {
+      rbDoNotUse->setChecked(true);
+      cbSearchOutdatedAURPackages->setEnabled(false);
+    }
+    else //There are no helpers selected, so let's default to "DO NOT USE AUR"
+    {
+      rbDoNotUse->setChecked(true);
+      SettingsManager::setAURTool(ctn_NO_AUR_TOOL);
+    }
+
+    connect(rbDoNotUse, SIGNAL(toggled(bool)), this, SLOT(onDoNotUseAURSelected(bool)));
+    connect(rbPacaur, SIGNAL(toggled(bool)), this, SLOT(onPacaurSelected(bool)));
+    connect(rbYaourt, SIGNAL(toggled(bool)), this, SLOT(onYaourtSelected(bool)));
+    connect(rbTrizen, SIGNAL(toggled(bool)), this, SLOT(onTrizenSelected(bool)));
+
+    cbPacaurNoConfirm->setChecked(SettingsManager::getPacaurNoConfirmParam());
+    cbPacaurNoEdit->setChecked(SettingsManager::getPacaurNoEditParam());
+    cbTrizenNoConfirm->setChecked(SettingsManager::getTrizenNoConfirmParam());
+    cbTrizenNoEdit->setChecked(SettingsManager::getTrizenNoEditParam());
+    cbYaourtNoConfirm->setChecked(SettingsManager::getYaourtNoConfirmParam());
+    cbSearchOutdatedAURPackages->setChecked(SettingsManager::getSearchOutdatedAURPackages());
+  }    
 }
 
 /*
@@ -240,6 +351,70 @@ void OptionsDialog::initIconTab()
     m_greenIconPath = leGreenIcon->text();
     m_busyIconPath = leBusyIcon->text();
   }
+}
+
+/*
+ * Initializes super user tool used
+ */
+void OptionsDialog::initSUToolTab()
+{
+  if (UnixCommand::getLinuxDistro() == ectn_KAOS)
+  {
+    if (m_calledByOctopi) removeTabByName(tr("SU tool"));
+    else removeTabByName(tr("SU tool"));
+    return;
+  }
+
+  QStringList list;
+  list << ctn_AUTOMATIC;
+
+  //Now we populate the list of available SU tools
+  if (UnixCommand::hasTheExecutable(ctn_GKSU_2)){
+    list << ctn_GKSU_2;
+  }
+  if (UnixCommand::hasTheExecutable(ctn_KDESU)){
+    list << ctn_KDESU;
+  }
+  if (UnixCommand::hasTheExecutable(ctn_LXQTSU)){
+    list << ctn_LXQTSU;
+  }
+  /*if (UnixCommand::hasTheExecutable(ctn_OCTOPISUDO)){
+    list << ctn_OCTOPISUDO;
+  }*/
+  if (UnixCommand::hasTheExecutable(ctn_TDESU)){
+    list << ctn_TDESU;
+  }
+
+  if (list.count() == 1)
+  {
+    if (m_calledByOctopi) removeTabByName(tr("SU tool"));
+    else removeTabByName(tr("SU tool"));
+    return;
+  }
+
+  twSUTool->setRowCount(list.count());
+  twSUTool->setShowGrid(false);
+  twSUTool->setColumnCount(1);
+  twSUTool->setColumnWidth(0, 460);
+  twSUTool->verticalHeader()->hide();
+  twSUTool->horizontalHeader()->hide();
+  twSUTool->setSelectionBehavior(QAbstractItemView::SelectRows);
+  twSUTool->setSelectionMode(QAbstractItemView::SingleSelection);
+
+  int row = 0;
+  connect(twSUTool, SIGNAL(cellDoubleClicked(int,int)), this, SLOT(accept()));
+
+  while (row < (list.count()))
+  {
+    QTableWidgetItem *itemSU = new QTableWidgetItem();
+    itemSU->setFlags(itemSU->flags() ^ Qt::ItemIsEditable);
+    itemSU->setText(list.at(row));
+    twSUTool->setItem(row, 0, itemSU);
+    twSUTool->setRowHeight(row, 25);
+    row++;
+  }
+
+  twSUTool->sortByColumn(0, Qt::AscendingOrder);
 }
 
 void OptionsDialog::initSynchronizationTab()
@@ -305,7 +480,7 @@ void OptionsDialog::initTerminalTab(){
 
   if (terminals.count() <= 2)
   {
-    twTerminal->setEnabled(false);
+    removeTabByName(tr("Terminal"));
     return;
   }
 
@@ -341,8 +516,9 @@ void OptionsDialog::initTerminalTab(){
  * When user chooses OK button and saves all his changes
  */
 void OptionsDialog::accept(){
-  QString selectedTerminal;
+  CPUIntensiveComputing cic;
   bool emptyIconPath = false;
+  bool AURHasChanged = false;
 
   if (m_calledByOctopi)
   {
@@ -357,6 +533,70 @@ void OptionsDialog::accept(){
 
       m_backendHasChanged = true;
     }
+  }
+
+  //Set General...
+  if (cbShowPackageNumbersOutput->isChecked() != SettingsManager::getShowPackageNumbersOutput())
+  {
+    SettingsManager::setShowPackageNumbersOutput(cbShowPackageNumbersOutput->isChecked());
+  }
+  if (cbShowStopTransaction->isChecked() != SettingsManager::getShowStopTransaction())
+  {
+    SettingsManager::setShowStopTransaction(cbShowStopTransaction->isChecked());
+  }
+
+  //Set AUR Tool...
+  if (rbPacaur->isChecked() && SettingsManager::getAURToolName() != ctn_PACAUR_TOOL)
+  {
+    SettingsManager::setAURTool(ctn_PACAUR_TOOL);
+    AURHasChanged = true;
+  }
+  else if (rbYaourt->isChecked() && SettingsManager::getAURToolName() != ctn_YAOURT_TOOL)
+  {
+    SettingsManager::setAURTool(ctn_YAOURT_TOOL);
+    AURHasChanged = true;
+  }
+  else if (rbTrizen->isChecked() && SettingsManager::getAURToolName() != ctn_TRIZEN_TOOL)
+  {
+    SettingsManager::setAURTool(ctn_TRIZEN_TOOL);
+    AURHasChanged = true;
+  }
+  else if (rbDoNotUse->isChecked() && SettingsManager::getAURToolName() != ctn_NO_AUR_TOOL)
+  {
+    SettingsManager::setAURTool(ctn_NO_AUR_TOOL);
+    AURHasChanged = true;
+  }
+
+  if (cbPacaurNoConfirm->isChecked() != SettingsManager::getPacaurNoConfirmParam())
+  {
+    SettingsManager::setPacaurNoConfirmParam(cbPacaurNoConfirm->isChecked());
+    AURHasChanged = true;
+  }
+  if (cbPacaurNoEdit->isChecked() != SettingsManager::getPacaurNoEditParam())
+  {
+    SettingsManager::setPacaurNoEditParam(cbPacaurNoEdit->isChecked());
+    AURHasChanged = true;
+  }
+  if (cbYaourtNoConfirm->isChecked() != SettingsManager::getYaourtNoConfirmParam())
+  {
+    SettingsManager::setYaourtNoConfirmParam(cbYaourtNoConfirm->isChecked());
+    AURHasChanged = true;
+  }
+  if (cbTrizenNoConfirm->isChecked() != SettingsManager::getTrizenNoConfirmParam())
+  {
+    SettingsManager::setTrizenNoConfirmParam(cbTrizenNoConfirm->isChecked());
+    AURHasChanged = true;
+  }
+  if (cbTrizenNoEdit->isChecked() != SettingsManager::getTrizenNoEditParam())
+  {
+    SettingsManager::setTrizenNoEditParam(cbTrizenNoEdit->isChecked());
+    AURHasChanged = true;
+  }
+
+  if (cbSearchOutdatedAURPackages->isChecked() != SettingsManager::getSearchOutdatedAURPackages())
+  {
+    SettingsManager::setSearchOutdatedAURPackages(cbSearchOutdatedAURPackages->isChecked());
+    AURHasChanged = true;
   }
 
   //Set icon...
@@ -435,12 +675,26 @@ void OptionsDialog::accept(){
     }
   }
 
+  //Set SU tool...
+  QString selectedSUTool = SettingsManager::getSUTool();
+
+  if (twSUTool->currentItem())
+    selectedSUTool = twSUTool->item(twSUTool->row(twSUTool->currentItem()), 0)->text();
+
+  if (SettingsManager::getSUTool() != selectedSUTool)
+    SettingsManager::setSUTool(selectedSUTool);
+
   //Set terminal...
+  QString selectedTerminal;
+
   if (twTerminal->currentItem())
     selectedTerminal = twTerminal->item(twTerminal->row(twTerminal->currentItem()), 0)->text();
 
   if (SettingsManager::getTerminal() != selectedTerminal)
+  {
     SettingsManager::setTerminal(selectedTerminal);
+    emit terminalChanged();
+  }
 
   Options::result res=0;
 
@@ -455,6 +709,49 @@ void OptionsDialog::accept(){
 
   QDialog::accept();
   setResult(res);
+
+  if (AURHasChanged) emit AURToolChanged();
+}
+
+/*
+ * Whenever user selects to not use any AUR tool
+ */
+void OptionsDialog::onDoNotUseAURSelected(bool checked)
+{
+  if (checked) cbSearchOutdatedAURPackages->setEnabled(false);
+}
+
+/*
+ * Whenever user selects the Pacaur tool
+ */
+void OptionsDialog::onPacaurSelected(bool checked)
+{
+  if (checked) cbSearchOutdatedAURPackages->setEnabled(true);
+}
+
+/*
+ * Whenever user selects the Yaourt tool
+ */
+void OptionsDialog::onYaourtSelected(bool checked)
+{
+  if (checked) cbSearchOutdatedAURPackages->setEnabled(true);
+}
+
+/*
+ * Whenever user selects the Trizen tool
+ */
+void OptionsDialog::onTrizenSelected(bool checked)
+{
+  if (checked) cbSearchOutdatedAURPackages->setEnabled(true);
+}
+
+void OptionsDialog::removeTabByName(const QString &tabName)
+{
+  for (int i=0; i < tabWidget->count(); ++i)
+  {
+    if (tabWidget->tabText(i) == tabName)
+      tabWidget->removeTab(i);
+  }
 }
 
 /*

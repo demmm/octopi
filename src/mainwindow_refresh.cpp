@@ -73,7 +73,7 @@ void MainWindow::refreshMenuTools()
   static bool connectorPlv=false;
   static bool connectorRepo=false;
   static bool connectorCleaner=false;
-  static bool connectorGist=false;
+  static bool connectorPtpb=false;
 
   if (UnixCommand::hasTheExecutable("mirror-check"))
   {
@@ -128,19 +128,19 @@ void MainWindow::refreshMenuTools()
   else
     ui->actionCacheCleaner->setVisible(false);
 
-  if (UnixCommand::hasTheExecutable("gist"))
+  if (UnixCommand::hasTheExecutable("curl"))
   {
     ui->menuTools->menuAction()->setVisible(true);
     if (ui->menuTools->actions().indexOf(m_actionSysInfo) == -1)
     {
       ui->menuTools->addSeparator();
-      m_actionSysInfo->setText("SysInfo → gist.github.com");
+      m_actionSysInfo->setText("SysInfo → https://ptpb.pw");
       ui->menuTools->addAction(m_actionSysInfo);
 
-      if (!connectorGist)
+      if (!connectorPtpb)
       {
-        connect(m_actionSysInfo, SIGNAL(triggered()), this, SLOT(gistSysInfo()));
-        connectorGist=true;
+        connect(m_actionSysInfo, SIGNAL(triggered()), this, SLOT(ptpbSysInfo()));
+        connectorPtpb=true;
       }
     }
   }
@@ -196,10 +196,36 @@ void MainWindow::refreshGroupsWidget()
  */
 void MainWindow::AURToolSelected()
 {
-  savePackageColumnWidths();
+  bool lightPackageFilterConnected = false;
+  static QStandardItemModel emptyModel;
+  if (UnixCommand::getLinuxDistro() != ectn_CHAKRA) savePackageColumnWidths();
+  refreshTabInfo(true);
+  refreshTabFiles(true);
+  m_progressWidget->setRange(0, 100);
+  m_progressWidget->setValue(0);
+  m_progressWidget->show();
 
+  //Here we are changing view to list AUR packages ONLY
   if (m_actionSwitchToAURTool->isChecked())
   {
+    if ((UnixCommand::getLinuxDistro() != ectn_KAOS && ui->actionUseInstantSearch->isChecked()) ||
+         (UnixCommand::getLinuxDistro() == ectn_KAOS && !ui->actionUseInstantSearch->isChecked()))
+    {
+      disconnect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(reapplyPackageFilter()));
+      disconnect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(lightPackageFilter()));
+      connect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(lightPackageFilter()));
+      lightPackageFilterConnected = true;
+    }
+    else if (UnixCommand::getLinuxDistro() == ectn_KAOS && ui->actionUseInstantSearch->isChecked())
+    {
+      disconnect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(reapplyPackageFilter()));
+      connect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(reapplyPackageFilter()));
+      lightPackageFilterConnected = false;
+    }
+
+    if (UnixCommand::getLinuxDistro() != ectn_KAOS) ui->actionUseInstantSearch->setEnabled(false);
+
+    m_refreshForeignPackageList = false;
     m_actionMenuRepository->setEnabled(false);
     ui->twGroups->setEnabled(false);           
     ui->tvPackages->setColumnHidden(PackageModel::ctn_PACKAGE_REPOSITORY_COLUMN, true);
@@ -209,8 +235,31 @@ void MainWindow::AURToolSelected()
 
     ui->tvPackages->setColumnHidden(PackageModel::ctn_PACKAGE_POPULARITY_COLUMN, false);
   }
+  //Here we are changing view to list all packages
   else
   {
+    ui->actionUseInstantSearch->setEnabled(true);
+
+    if (UnixCommand::getLinuxDistro() != ectn_KAOS && ui->actionUseInstantSearch->isChecked())
+    {
+      disconnect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(lightPackageFilter()));
+      disconnect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(reapplyPackageFilter()));
+      connect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(reapplyPackageFilter()));
+      lightPackageFilterConnected = false;
+    }
+    else if (UnixCommand::getLinuxDistro() == ectn_KAOS && !ui->actionUseInstantSearch->isChecked())
+    {
+      disconnect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(lightPackageFilter()));
+      disconnect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(reapplyPackageFilter()));
+      connect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(lightPackageFilter()));
+      lightPackageFilterConnected = true;
+    }
+
+    m_packageModel->applyFilter("");
+    ui->tvPackages->setModel(&emptyModel);
+    removePackageTreeViewConnections();
+    //m_actionSwitchToAURTool->setEnabled(false);
+    m_refreshForeignPackageList = true;
     m_actionMenuRepository->setEnabled(true);
     ui->twGroups->setEnabled(true);
     ui->tvPackages->setColumnHidden(PackageModel::ctn_PACKAGE_POPULARITY_COLUMN, true);
@@ -218,14 +267,31 @@ void MainWindow::AURToolSelected()
 
     if (!SettingsManager::hasPacmanBackend())
       ui->tvPackages->setColumnHidden(PackageModel::ctn_PACKAGE_SIZE_COLUMN, false);
+
+    clearStatusBar();
   }
+
+  //Let's clear the list of visited packages (pkg anchors in Info tab)
+  m_listOfVisitedPackages.clear();
+  m_indOfVisitedPackage = 0;
 
   switchToViewAllPackages();
   m_selectedRepository = "";
   m_actionRepositoryAll->setChecked(true);
   m_refreshPackageLists = false;
-  m_leFilterPackage->clear();
+
+  if (lightPackageFilterConnected && !ui->actionUseInstantSearch->isChecked())
+    disconnect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(lightPackageFilter()));
+
+  //TODO: Make this optional by the user
+  //m_leFilterPackage->clear();
+  //m_leFilterPackage->initStyleSheet();
+
+  if (lightPackageFilterConnected && !ui->actionUseInstantSearch->isChecked())
+    connect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(lightPackageFilter()));
+
   metaBuildPackageList();
+  refreshInfoAndFileTabs();
 }
 
 /*
@@ -384,13 +450,14 @@ void MainWindow::preBuildAURPackageListMeta()
 
   if (UnixCommand::getLinuxDistro() == ectn_KAOS)
   {
-    connect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(reapplyPackageFilter()));   
+    disconnect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(reapplyPackageFilter()));
+    connect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(reapplyPackageFilter()));
     reapplyPackageFilter();
   }
 }
 
 /*
- * Executes QFuture to retrieve Outdated AUR list of packages
+ * Executes QFuture to retrieve Foreign list of packages
  */
 void MainWindow::retrieveForeignPackageList()
 {
@@ -528,15 +595,13 @@ void MainWindow::metaBuildPackageList()
   ui->twGroups->setEnabled(false);
   ui->tvPackages->setSelectionMode(QAbstractItemView::ExtendedSelection);
 
+  //Here we build the list of all available packages
   if (ui->twGroups->topLevelItemCount() == 0 || isAllGroupsSelected())
   {        
     ui->actionSearchByFile->setEnabled(true);
     ui->actionSearchByName->setChecked(true);
 
     toggleSystemActions(false);
-    disconnect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(reapplyPackageFilter()));
-    connect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(reapplyPackageFilter()));
-    reapplyPackageFilter();
     disconnect(&g_fwPacman, SIGNAL(finished()), this, SLOT(preBuildPackageList()));
 
     QEventLoop el;
@@ -553,6 +618,7 @@ void MainWindow::metaBuildPackageList()
       std::cout << m_packageModel->getPackageCount() << " pkgs => " <<
                  "Time elapsed building pkgs from 'ALL group' list: " << m_time->elapsed() << " mili seconds." << std::endl << std::endl;
   }
+  //Here we build the list of all AUR/KCP packages
   else if (isAURGroupSelected())
   {
     m_toolButtonPacman->hide();
@@ -567,7 +633,6 @@ void MainWindow::metaBuildPackageList()
       ui->tvPackages->setSelectionMode(QAbstractItemView::SingleSelection);
 
       toggleSystemActions(false);
-      clearStatusBar();
       m_listOfAURPackages = new QList<PackageListData>();
       m_leFilterPackage->setFocus();
       ui->twGroups->setEnabled(false);
@@ -594,7 +659,7 @@ void MainWindow::metaBuildPackageList()
     }
 
     toggleSystemActions(false);
-    disconnect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(reapplyPackageFilter()));
+    //disconnect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(reapplyPackageFilter())); //WATCH OUT!
     clearStatusBar();
 
     m_cic = new CPUIntensiveComputing();       
@@ -618,13 +683,11 @@ void MainWindow::metaBuildPackageList()
       m_leFilterPackage->setFocus();
     }
   }
+  //Here we build the list of packages available in the selected package group
   else
   {
     ui->actionSearchByFile->setEnabled(false);
     toggleSystemActions(false);
-    disconnect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(reapplyPackageFilter()));
-    connect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(reapplyPackageFilter()));
-    reapplyPackageFilter();
     disconnect(&g_fwPacmanGroup, SIGNAL(finished()), this, SLOT(preBuildPackagesFromGroupList()));
 
     QEventLoop el;
@@ -715,8 +778,9 @@ void MainWindow::buildPackageList()
     {
       if(m_debugInfo)
         std::cout << "Time elapsed setting outdated foreign pkgs from 'ALL group' list: " << m_time->elapsed() << " mili seconds." << std::endl;
-    }
-    else
+    }  
+
+    if (m_hasAURTool && m_refreshForeignPackageList)
     {
       delete m_foreignPackageList;
       m_foreignPackageList = NULL;
@@ -753,6 +817,13 @@ void MainWindow::buildPackageList()
 
   m_packageRepo.setData(list, *m_unrequiredPackageList);
 
+  if (ui->tvPackages->model() != m_packageModel.get())
+  {
+    ui->tvPackages->setModel(m_packageModel.get());
+    initPackageTreeView();
+    ui->tvPackages->setColumnHidden(PackageModel::ctn_PACKAGE_POPULARITY_COLUMN, true);
+  }
+
   if(m_debugInfo)
     std::cout << "Time elapsed setting the list to the treeview: " << m_time->elapsed() << " mili seconds." << std::endl;
 
@@ -776,11 +847,6 @@ void MainWindow::buildPackageList()
   delete list;
   list = NULL;
 
-  if (!m_groupWidgetNeedsFocus && isPackageTreeViewVisible())
-  {
-    ui->tvPackages->setFocus();
-  }
-
   refreshColumnSortSetup();
 
   //Refresh statusbar widget
@@ -791,13 +857,11 @@ void MainWindow::buildPackageList()
 
   if (firstTime)
   {
-    if (isPackageTreeViewVisible())
-    {
-      ui->tvPackages->setFocus(); //m_leFilterPackage->setFocus();
-    }
-
     m_initializationCompleted = true;        
+    //if (m_actionSwitchToAURTool->isVisible()) m_actionSwitchToAURTool->setEnabled(true);
     firstTime = false;
+    if (m_outdatedStringList->count() > 0)
+      execCommandInAnotherThread(ctn_PACMAN_SUP_COMMAND);
 
     if (m_callSystemUpgrade)
     {
@@ -823,8 +887,20 @@ void MainWindow::buildPackageList()
 
   refreshToolBar();
   m_refreshPackageLists = true;
+  m_refreshForeignPackageList = true;
 
-  m_outdatedAURTimer->start();
+  if (SettingsManager::getSearchOutdatedAURPackages()) m_outdatedAURTimer->start();
+  else
+  {
+    if (m_hasAURTool && !m_actionSwitchToAURTool->isEnabled()) m_actionSwitchToAURTool->setEnabled(true);
+
+    QModelIndex mi = ui->tvPackages->currentIndex();
+    m_packageRepo.setAUROutdatedData(m_foreignPackageList, *m_outdatedAURStringList);
+    ui->tvPackages->setCurrentIndex(mi);
+    m_leFilterPackage->setFocus();
+  }
+
+  if (!ui->twGroups->isEnabled()) ui->twGroups->setEnabled(true);
 }
 
 /*
@@ -837,7 +913,7 @@ void MainWindow::postBuildPackageList()
 
   if (distro != ectn_KAOS && isAURGroupSelected()) return;
 
-  if (m_hasAURTool)
+  //if (m_hasAURTool)
   {
     bool reconnectSlot = false;
 
@@ -849,31 +925,13 @@ void MainWindow::postBuildPackageList()
       reconnectSlot = true;
     }
 
-    QEventLoop el;
-    QFuture<QStringList *> f = QtConcurrent::run(getOutdatedAURStringList);
-    connect(&g_fwOutdatedAURStringList, SIGNAL(finished()), &el, SLOT(quit()));
-    g_fwOutdatedAURStringList.setFuture(f);
-    el.exec();
-
-    m_outdatedAURStringList = g_fwOutdatedAURStringList.result();
-    for(int c=0; c<m_outdatedAURStringList->count(); ++c)
-    {
-      //If we find an outdated AUR pkg in the official pkg list, let's remove it
-      PackageRepository::PackageData * pd = m_packageRepo.getFirstPackageByName(m_outdatedAURStringList->at(c));
-      if (pd && pd->status != ectn_FOREIGN_OUTDATED)
-      {
-        m_outdatedAURStringList->removeAt(c);
-      }
-    }
+    refreshOutdatedAURStringList();
 
     if (distro != ectn_KAOS && isAURGroupSelected()) return;
 
+    QModelIndex mi = ui->tvPackages->currentIndex();
     m_packageRepo.setAUROutdatedData(m_foreignPackageList, *m_outdatedAURStringList);
-
-    QModelIndex maux = m_packageModel->index(0, 0, QModelIndex());
-    ui->tvPackages->setCurrentIndex(maux);
-    ui->tvPackages->scrollTo(maux, QAbstractItemView::PositionAtCenter);
-    ui->tvPackages->setCurrentIndex(maux);
+    ui->tvPackages->setCurrentIndex(mi);
 
     if (m_outdatedStringList->count() == 0 && m_outdatedAURStringList->count() > 0)
       refreshAppIcon();
@@ -885,6 +943,8 @@ void MainWindow::postBuildPackageList()
       connect(ui->tvPackages->selectionModel(), SIGNAL(selectionChanged(QItemSelection,QItemSelection)),
             this, SLOT(invalidateTabs()));
     }
+
+    if (m_commandExecuting == ectn_NONE && !m_actionSwitchToAURTool->isEnabled()) m_actionSwitchToAURTool->setEnabled(true);
   }
 
   if (m_groupWidgetNeedsFocus)
@@ -893,6 +953,20 @@ void MainWindow::postBuildPackageList()
     m_groupWidgetNeedsFocus = false;
   }
   else m_leFilterPackage->setFocus();
+}
+
+/*
+ * Refreshes the list of outdated AUR packages
+ */
+void MainWindow::refreshOutdatedAURStringList()
+{
+  QEventLoop el;
+  QFuture<QStringList *> f = QtConcurrent::run(getOutdatedAURStringList);
+  connect(&g_fwOutdatedAURStringList, SIGNAL(finished()), &el, SLOT(quit()));
+  g_fwOutdatedAURStringList.setFuture(f);
+  el.exec();
+
+  m_outdatedAURStringList = g_fwOutdatedAURStringList.result();
 }
 
 /*
@@ -919,49 +993,6 @@ void MainWindow::refreshColumnSortSetup()
 }
 
 /*
- * Repopulates the list of available packages (installed [+ non-installed])
- */
-void MainWindow::refreshPackageList()
-{
-  CPUIntensiveComputing cic;
-  const std::unique_ptr<const QSet<QString> > unrequiredPackageList(Package::getUnrequiredPackageList());
-  QList<PackageListData> *list = Package::getPackageList();
-
-  // Fetch foreign package list
-  std::unique_ptr<QList<PackageListData> > listForeign(Package::getForeignPackageList());
-  PackageListData pld;
-  QList<PackageListData>::const_iterator itForeign = listForeign->begin();
-
-  if (!isSearchByFileSelected())
-  {
-    while (itForeign != listForeign->end())
-    {
-      if (!m_hasAURTool || !m_outdatedAURStringList->contains(itForeign->name))
-      {
-        pld = PackageListData(
-              itForeign->name, itForeign->repository, itForeign->version,
-              itForeign->name + " " + Package::getInformationDescription(itForeign->name, true),
-              ectn_FOREIGN);
-      }
-      else
-      {
-        pld = PackageListData(
-              itForeign->name, itForeign->repository, itForeign->version,
-              itForeign->name + " " + Package::getInformationDescription(itForeign->name, true),
-              ectn_FOREIGN_OUTDATED);
-      }
-
-      list->append(pld);
-      ++itForeign;
-    }
-  }
-
-  m_packageRepo.setData(list, *unrequiredPackageList);
-  delete list;
-  list = NULL;
-}
-
-/*
  * Populates the list of found AUR packages (installed [+ non-installed])
  * given the searchString parameter passed.
  *
@@ -969,7 +1000,6 @@ void MainWindow::refreshPackageList()
 void MainWindow::buildAURPackageList()
 {
   ui->tvPackages->setColumnHidden(PackageModel::ctn_PACKAGE_REPOSITORY_COLUMN, true);
-
   ui->actionSearchByDescription->setChecked(true);
   m_progressWidget->show();
 
@@ -1002,11 +1032,33 @@ void MainWindow::buildAURPackageList()
   ui->tvPackages->setCurrentIndex(maux);
 
   list->clear();
-  //invalidateTabs();
 
-  if (isPackageTreeViewVisible())
+  if (UnixCommand::getLinuxDistro() != ectn_KAOS ||
+      (UnixCommand::getLinuxDistro() == ectn_KAOS && !ui->actionUseInstantSearch->isChecked()))
   {
-    ui->tvPackages->setFocus();
+    QString search = Package::parseSearchString(m_leFilterPackage->text());
+    m_packageModel->applyFilter(search);
+
+    ui->tvPackages->selectionModel()->clear();
+    QModelIndex mi = m_packageModel->index(0, PackageModel::ctn_PACKAGE_NAME_COLUMN, QModelIndex());
+    ui->tvPackages->setCurrentIndex(mi);
+    ui->tvPackages->scrollTo(mi);
+    invalidateTabs();
+
+    int numPkgs = m_packageModel->getPackageCount();
+
+    if (m_leFilterPackage->text() != ""){
+      if (numPkgs > 0) m_leFilterPackage->setFoundStyle();
+      else m_leFilterPackage->setNotFoundStyle();
+    }
+    else{
+      m_leFilterPackage->initStyleSheet();
+      m_packageModel->applyFilter("");
+    }
+  }
+  else
+  {
+    reapplyPackageFilter();
   }
 
   //Refresh counters
@@ -1014,10 +1066,10 @@ void MainWindow::buildAURPackageList()
 
   //Refresh statusbar widget
   refreshStatusBar();
+  tvPackagesSelectionChanged(QItemSelection(),QItemSelection());
 
   //Refresh application icon
   refreshAppIcon();
-  reapplyPackageFilter();
 
   counter = list->count();
   m_progressWidget->setValue(counter);
@@ -1110,7 +1162,7 @@ void MainWindow::refreshStatusBarToolButtons()
 {
   if (isAURGroupSelected() && UnixCommand::getLinuxDistro() != ectn_KAOS) return;
 
-  if (m_hasAURTool)
+  if (m_hasAURTool && SettingsManager::getSearchOutdatedAURPackages())
   {
     QFuture<AUROutdatedPackages *> f;
     f = QtConcurrent::run(getOutdatedAURPackages);
@@ -1127,6 +1179,8 @@ void MainWindow::refreshStatusBarToolButtons()
  */
 void MainWindow::refreshStatusBar()
 {
+  m_lblSelCounter->setVisible(true);
+  m_lblTotalCounters->setVisible(true);
   QString text;
   ui->statusBar->removeWidget(m_toolButtonPacman);
   ui->statusBar->removeWidget(m_toolButtonAUR);
@@ -1137,12 +1191,22 @@ void MainWindow::refreshStatusBar()
   {
     text = StrConstants::getNumberInstalledPackages(numberOfInstalledPackages);
   }
-  else if (m_leFilterPackage->text().isEmpty() && !m_packageModel->isFiltered())
+  else if (m_packageModel->getPackageCount() > 0 && m_leFilterPackage->text().isEmpty() && !m_packageModel->isFiltered())
   {
     text = StrConstants::getNumberInstalledPackages(m_numberOfInstalledPackages);
   }
-  else
+  else if (m_packageModel->getPackageCount() == 0)
   {
+    //if (isAURGroupSelected() && UnixCommand::getLinuxDistro() != ectn_KAOS)
+    {
+      //if (m_packageModel->getPackageCount() == 0)
+      {
+        m_lblSelCounter->setText("");
+        m_lblSelCounter->setVisible(false);
+        m_lblTotalCounters->setVisible(false);
+      }
+    }
+
     text = StrConstants::getNumberInstalledPackages(0);
   }
 
@@ -1266,7 +1330,7 @@ void MainWindow::refreshTabInfo(bool clearContents, bool neverQuit)
     {
       PackageInfoData kcp;
 
-      if (Package::getForeignRepositoryToolName() == "kcp")
+      if (Package::getForeignRepositoryToolName() == ctn_KCP_TOOL)
       {
         QEventLoop el;
         QFuture<PackageInfoData> f;
@@ -1284,17 +1348,21 @@ void MainWindow::refreshTabInfo(bool clearContents, bool neverQuit)
 
       html += "<meta http-equiv=\"Content-Type\" content=\"text/html; charset=utf-8\">";
       html += "<a id=\"" + anchorBegin + "\"></a>";            
-      html += "<h2>" + pkgName + "</h2>";
 
-      if (Package::getForeignRepositoryToolName() != "kcp")
+      if (UnixCommand::getLinuxDistro() != ectn_KAOS && UnixCommand::getLinuxDistro() != ectn_CHAKRA)
+        html += "<h2><a href=\"https://aur.archlinux.org/packages/" + pkgName + "\">" + pkgName + "</a></h2>";
+      else
+        html += "<h2>" + pkgName + "</h2>";
+
+      if (Package::getForeignRepositoryToolName() != ctn_KCP_TOOL)
       {
         html += "<a style=\"font-size:16px;\">" + pkgDescription + "</a>";
         html += "<table border=\"0\">";
         html += "<tr><th width=\"20%\"></th><th width=\"80%\"></th></tr>";
         html += "<tr><td>" + version + "</td><td>" + package->version + "</td></tr>";        
 
-        if (Package::getForeignRepositoryToolName() == "yaourt" ||
-            Package::getForeignRepositoryToolName() == "pacaur")
+        if (Package::getForeignRepositoryToolName() == ctn_YAOURT_TOOL ||
+            Package::getForeignRepositoryToolName() == ctn_PACAUR_TOOL)
         {
           QString url = Package::getAURUrl(pkgName);
           if (!url.isEmpty() && !url.contains("(null)"))
@@ -1303,7 +1371,7 @@ void MainWindow::refreshTabInfo(bool clearContents, bool neverQuit)
           }
         }
       }
-      else if (Package::getForeignRepositoryToolName() == "kcp")
+      else if (Package::getForeignRepositoryToolName() == ctn_KCP_TOOL)
       {
         html += "<a style=\"font-size:16px;\">" + kcp.description + "</a>";
         html += "<table border=\"0\">";
@@ -1325,7 +1393,6 @@ void MainWindow::refreshTabInfo(bool clearContents, bool neverQuit)
       }
 
       html += "</table>";
-
       text->setHtml(html);
       text->scrollToAnchor(anchorBegin);
     }
@@ -1590,6 +1657,7 @@ void MainWindow::refreshTabFiles(bool clearContents, bool neverQuit)
  */
 void MainWindow::reapplyPackageFilter()
 {
+  //We are not in a search by filenames...
   if (!isSearchByFileSelected())
   {
     bool isFilterPackageSelected = m_leFilterPackage->hasFocus();
@@ -1623,15 +1691,45 @@ void MainWindow::reapplyPackageFilter()
   //If we are using "Search By file...
   else
   {
-    disconnect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(reapplyPackageFilter()));
-
     m_leFilterPackage->initStyleSheet();
 
     //We need to provide QCompleter data to the SearchLineEdit...
     if (!m_leFilterPackage->text().isEmpty())
       m_leFilterPackage->refreshCompleterData();
+  }
+}
 
-    connect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(reapplyPackageFilter()));
+/*
+ * This SLOT is called every time we press a key at FilterLineEdit, but ONLY when INSTANT SEARCH is disabled
+ */
+void MainWindow::lightPackageFilter()
+{
+  if (isAURGroupSelected())
+  {
+    if (m_leFilterPackage->text() == "")
+    {
+      if (UnixCommand::getLinuxDistro() != ectn_KAOS)
+      {
+        m_packageModel->applyFilter("ççç");
+        m_leFilterPackage->initStyleSheet();
+        refreshStatusBar();
+      }
+      else
+      {
+        m_packageModel->applyFilter("");
+        reapplyPackageFilter();
+        refreshStatusBar();
+      }
+    }
+  }
+  else if (!isAURGroupSelected())
+  {
+    if (m_leFilterPackage->text() == "")
+    {
+      CPUIntensiveComputing cic;
+      m_packageModel->applyFilter("");
+      reapplyPackageFilter();
+    }
   }
 }
 

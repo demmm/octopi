@@ -32,6 +32,12 @@
 #include <iostream>
 #include "optionsdialog.h"
 
+#ifdef QTERMWIDGET
+  #include "termwidget.h"
+#endif
+
+#include <QDropEvent>
+#include <QMimeData>
 #include <QStandardItemModel>
 #include <QString>
 #include <QTextBrowser>
@@ -64,6 +70,7 @@ MainWindow::MainWindow(QWidget *parent) :
   m_initializationCompleted=false;
   m_systemUpgradeDialog = false;
   m_refreshPackageLists = false;
+  m_refreshForeignPackageList = false;
   m_cic = NULL;
   m_outdatedStringList = new QStringList();
   m_outdatedAURStringList = new QStringList();
@@ -72,10 +79,11 @@ MainWindow::MainWindow(QWidget *parent) :
   m_selectedRepository = "";
   m_numberOfInstalledPackages = 0;
   m_debugInfo = false;
+  m_console = nullptr;
 
   m_time = new QTime();
-  m_unrequiredPackageList = NULL;
-  m_foreignPackageList = NULL;
+  m_unrequiredPackageList = nullptr;
+  m_foreignPackageList = nullptr;
   m_groupWidgetNeedsFocus = false;
   m_outdatedAURTimer = new QTimer();
   m_outdatedAURTimer->setInterval(50);
@@ -96,6 +104,8 @@ MainWindow::MainWindow(QWidget *parent) :
 
   connect(m_pacmanDatabaseSystemWatcher,
           SIGNAL(directoryChanged(QString)), this, SLOT(onPacmanDatabaseChanged()));
+
+  setAcceptDrops(true);
 }
 
 /*
@@ -132,10 +142,10 @@ void MainWindow::show()
     initTabTransaction();
     initTabHelpUsage();
     initTabNews();
-    initLineEditFilterPackages();
     initPackageTreeView();
     initActions();
     loadSettings();
+    initLineEditFilterPackages();
     loadPanelSettings();
     initStatusBar();
     initToolButtonPacman();
@@ -143,6 +153,11 @@ void MainWindow::show()
     initAppIcon();
     initMenuBar();
     initToolBar();
+
+#ifdef QTERMWIDGET
+    onTerminalChanged();
+#endif
+
     initTabWidgetPropertiesIndex();
     refreshDistroNews(false);
 
@@ -172,11 +187,71 @@ void MainWindow::show()
 }
 
 /*
+ * Whenever a user drops a package from any outside source, we try to install it
+ */
+void MainWindow::dropEvent(QDropEvent *ev)
+{
+  m_packagesToInstallList.clear();
+
+  QList<QUrl> urls = ev->mimeData()->urls();
+
+  foreach(QUrl url, urls)
+  {
+    QString str = url.fileName();
+    QFileInfo f(str);
+    if (f.completeSuffix().contains("pkg.tar"))
+    {
+      m_packagesToInstallList.append(url.toLocalFile());
+    }
+  }
+
+  if (m_packagesToInstallList.count() > 0)
+    doInstallLocalPackages();
+}
+
+/*
+ * Whenever an outside package enters Octopi mainwindow space, we check to see if it's really a package
+ */
+void MainWindow::dragEnterEvent(QDragEnterEvent *ev)
+{
+  bool success = false;
+  QList<QUrl> urls = ev->mimeData()->urls();
+
+  foreach(QUrl url, urls)
+  {
+    QString str = url.fileName();
+    QFileInfo f(str);
+    if (f.completeSuffix().contains("pkg.tar"))
+    {
+      success=true;
+      break;
+    }
+  }
+
+  if (success) ev->accept();
+  else ev->ignore();
+}
+
+/*
  * Whenever there is a change in the pacman database...
  */
 void MainWindow::onPacmanDatabaseChanged()
 {
   if (m_initializationCompleted) m_refreshPackageLists = true;
+}
+
+/*
+ * Whenever user changes the Groups widget item...
+ */
+void MainWindow::onPackageGroupChanged()
+{
+  if (isAllGroupsSelected())
+  {
+    if (m_commandExecuting == ectn_NONE && m_initializationCompleted) m_actionSwitchToAURTool->setEnabled(true);
+    ui->actionSearchByName->setChecked(true);
+    tvPackagesSearchColumnChanged(ui->actionSearchByName);
+  }
+  else m_actionSwitchToAURTool->setEnabled(false);
 }
 
 /*
@@ -187,6 +262,12 @@ void MainWindow::onOptions()
   if (m_commandExecuting != ectn_NONE) return;
 
   OptionsDialog *od = new OptionsDialog(this);
+  connect(od, SIGNAL(AURToolChanged()), this, SLOT(onAURToolChanged()));
+
+#ifdef QTERMWIDGET
+  connect(od, SIGNAL(terminalChanged()), this, SLOT(onTerminalChanged()));
+#endif
+
   od->exec();
   Options::result res = od->result();
 
@@ -237,12 +318,15 @@ QTextBrowser *MainWindow::getOutputTextBrowser()
 void MainWindow::showAnchorDescription(const QUrl &link)
 {
   if (link.toString().contains("goto:"))
-  {
+  {            
     QString pkgName = link.toString().mid(5);
+    //Let's remove any "<" and "<=" symbol...
+    pkgName.remove(QRegularExpression("%3C\\S*"));
+
     if (pkgName == "sh") pkgName = "bash";
     QFuture<QString> f;
     disconnect(&g_fwToolTipInfo, SIGNAL(finished()), this, SLOT(execToolTip()));
-    f = QtConcurrent::run(showPackageInfo, pkgName);
+    f = QtConcurrent::run(showPackageDescription, pkgName);
     g_fwToolTipInfo.setFuture(f);
     connect(&g_fwToolTipInfo, SIGNAL(finished()), this, SLOT(execToolTip()));
   }
@@ -262,6 +346,9 @@ void MainWindow::execToolTip()
   QToolTip::showText(point, g_fwToolTipInfo.result());
 }
 
+/*
+ * Whenever we want to position the cursor in a specific package in the list
+ */
 void MainWindow::positionInPackageList(const QString &pkgName)
 {
   QModelIndex columnIndex = m_packageModel->index(0, PackageModel::ctn_PACKAGE_NAME_COLUMN, QModelIndex());
@@ -271,7 +358,6 @@ void MainWindow::positionInPackageList(const QString &pkgName)
   if (foundItems.count() == 1)
   {
     proxyIndex = foundItems.first();
-
     if(proxyIndex.isValid())
     {
       ui->tvPackages->scrollTo(proxyIndex, QAbstractItemView::PositionAtCenter);
@@ -286,6 +372,8 @@ void MainWindow::positionInPackageList(const QString &pkgName)
     ensureTabVisible(ctn_TABINDEX_INFORMATION);
     connect(ui->twProperties, SIGNAL(currentChanged(int)), this, SLOT(changedTabIndex()));
   }
+
+  ui->tvPackages->setFocus();
 }
 
 /*
@@ -298,10 +386,12 @@ void MainWindow::outputTextBrowserAnchorClicked(const QUrl &link)
     QString pkgName = link.toString().mid(5);
     if (pkgName == "sh") pkgName = "bash";
     bool indIncremented = false;
-    QItemSelectionModel*const selectionModel = ui->tvPackages->selectionModel();
+    const QItemSelectionModel*const selectionModel = ui->tvPackages->selectionModel();
+
     if (selectionModel->selectedRows().count() <= 0) return;
 
-    QModelIndex item = selectionModel->selectedRows(PackageModel::ctn_PACKAGE_NAME_COLUMN).first();
+    QModelIndexList selectedRows = selectionModel->selectedRows();
+    QModelIndex item = selectedRows.at(0);
     const PackageRepository::PackageData*const selectedPackage = m_packageModel->getData(item);
 
     if (!m_listOfVisitedPackages.isEmpty())
@@ -349,8 +439,10 @@ void MainWindow::outputTextBrowserAnchorClicked(const QUrl &link)
 
     if (indIncremented == false) m_indOfVisitedPackage++;
 
+    if (!m_leFilterPackage->text().isEmpty()) m_leFilterPackage->clear();
     positionInPackageList(pkgName);
   }
+  //Otherwise, it's a remote URL which needs to be opened outside Octopi
   else
   {
     QDesktopServices::openUrl(link);
@@ -532,6 +624,27 @@ bool MainWindow::isSearchByFileSelected()
 }
 
 /*
+ * Enables/disables INSTANT SEARCH feature
+ */
+void MainWindow::toggleInstantSearch()
+{
+  if (ui->actionUseInstantSearch->isChecked())
+  {
+    SettingsManager::setInstantSearchSelected(true);
+    disconnect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(lightPackageFilter()));
+    disconnect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(reapplyPackageFilter()));
+    connect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(reapplyPackageFilter()));
+  }
+  else
+  {
+    SettingsManager::setInstantSearchSelected(false);
+    disconnect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(lightPackageFilter()));
+    disconnect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(reapplyPackageFilter()));
+    connect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(lightPackageFilter()));
+  }
+}
+
+/*
  * Switches debugInfo ON!
  */
 void MainWindow::turnDebugInfoOn()
@@ -590,6 +703,12 @@ void MainWindow::tvPackagesSearchColumnChanged(QAction *actionSelected)
   //We are in the realm of tradictional NAME search
   if (actionSelected->objectName() == ui->actionSearchByName->objectName())
   {
+    if (ui->actionUseInstantSearch->isChecked())
+    {
+      disconnect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(reapplyPackageFilter()));
+      connect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(reapplyPackageFilter()));
+    }
+
     ui->menuView->setEnabled(true);
     if (!m_actionSwitchToAURTool->isChecked()) ui->twGroups->setEnabled(true);
 
@@ -603,6 +722,12 @@ void MainWindow::tvPackagesSearchColumnChanged(QAction *actionSelected)
   //We are talking about slower 'search by description'...
   else if (actionSelected->objectName() == ui->actionSearchByDescription->objectName())
   {
+    if (ui->actionUseInstantSearch->isChecked())
+    {
+      disconnect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(reapplyPackageFilter()));
+      connect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(reapplyPackageFilter()));
+    }
+
     ui->menuView->setEnabled(true);
     if (!m_actionSwitchToAURTool->isChecked()) ui->twGroups->setEnabled(true);
 
@@ -615,6 +740,8 @@ void MainWindow::tvPackagesSearchColumnChanged(QAction *actionSelected)
   }
   else if (actionSelected->objectName() == ui->actionSearchByFile->objectName())
   {
+    disconnect(m_leFilterPackage, SIGNAL(textChanged(QString)), this, SLOT(reapplyPackageFilter()));
+
     m_leFilterPackage->clear();
     m_packageModel->applyFilter("");
     ui->actionViewAllPackages->trigger();
@@ -628,7 +755,6 @@ void MainWindow::tvPackagesSearchColumnChanged(QAction *actionSelected)
   if (!isSearchByFileSelected() && m_packageModel->getPackageCount() <= 1)
   {
     m_leFilterPackage->clear();
-    //metaBuildPackageList();
   }
 
   QModelIndex mi = m_packageModel->index(0, PackageModel::ctn_PACKAGE_NAME_COLUMN, QModelIndex());
@@ -636,9 +762,9 @@ void MainWindow::tvPackagesSearchColumnChanged(QAction *actionSelected)
   ui->tvPackages->scrollTo(mi);
 
   changedTabIndex();
-
-  if (isPackageTreeViewVisible() && !ui->tvPackages->hasFocus()) ui->tvPackages->setFocus();
-  else m_leFilterPackage->setFocus();
+  m_leFilterPackage->setFocus();
+  //if (isPackageTreeViewVisible() && !ui->tvPackages->hasFocus()) ui->tvPackages->setFocus();
+  //else m_leFilterPackage->setFocus();
 }
 
 /*
@@ -749,16 +875,21 @@ void MainWindow::execContextMenuPackages(QPoint point)
     {
       QModelIndex item = selectedRows.at(0);
       const PackageRepository::PackageData*const package = m_packageModel->getData(item);
+      if (package)
+      {
+        menu->addAction(m_actionPackageInfo);
+      }
       if (package && package->installed()) {
         menu->addAction(ui->actionFindFileInPackage);
-        menu->addSeparator();
       }
+      if (!menu->actions().isEmpty()) menu->addSeparator();
     }
 
     bool allInstallable = true;
     bool allRemovable = true;    
     int numberOfSelPkgs = selectedRows.count();
     int numberOfAUR = 0;
+    int numberOfOutdated = 0;
 
     foreach(QModelIndex item, selectedRows)
     {
@@ -769,6 +900,7 @@ void MainWindow::execContextMenuPackages(QPoint point)
         allInstallable = false;
         numberOfAUR++;
       }
+      if (package->outdated()) numberOfOutdated ++;
       if (package->installed() == false)
       {
         allRemovable = false;
@@ -778,7 +910,19 @@ void MainWindow::execContextMenuPackages(QPoint point)
     if (allInstallable) // implicitly foreign packages == 0
     {
       if (!isAllGroupsSelected() && !isAURGroupSelected()) menu->addAction(ui->actionInstallGroup);
+      if (allRemovable == false && numberOfOutdated != numberOfSelPkgs)
+      {
+        ui->actionInstall->setText(StrConstants::getInstall());
+      }
+      else if (allRemovable == true && numberOfOutdated == numberOfSelPkgs)
+      {
+        ui->actionInstall->setText(StrConstants::getUpdate());
+      }
+      else if (allRemovable == true)
+        ui->actionInstall->setText(StrConstants::getReinstall());
+
       menu->addAction(ui->actionInstall);
+
 
       if (!isAllGroupsSelected() && !isAURGroupSelected()) //&& numberOfSelPkgs > 1)
       {
@@ -1102,6 +1246,20 @@ void MainWindow::onDoubleClickPackageList()
 }
 
 /*
+ * Whenever user selects a package in the pkg list
+ */
+void MainWindow::refreshInfoAndFileTabs()
+{
+  if(ui->twProperties->currentIndex() == ctn_TABINDEX_INFORMATION)
+    refreshTabInfo();
+  else if (ui->twProperties->currentIndex() == ctn_TABINDEX_FILES)
+    refreshTabFiles();
+
+  if(m_initializationCompleted)
+    saveSettings(ectn_CURRENTTABINDEX);
+}
+
+/*
  * When the user changes the current selected tab, we must take care of data refresh.
  */
 void MainWindow::changedTabIndex()
@@ -1111,8 +1269,15 @@ void MainWindow::changedTabIndex()
   else if (ui->twProperties->currentIndex() == ctn_TABINDEX_FILES)
     refreshTabFiles();
 
+#ifdef QTERMWIDGET
+  else if (ui->twProperties->currentIndex() == ctn_TABINDEX_TERMINAL)
+  {
+    m_console->setFocus();
+  }
+#endif
+
   if(m_initializationCompleted)
-    saveSettings(ectn_CurrentTabIndex);
+    saveSettings(ectn_CURRENTTABINDEX);
 }
 
 /*
@@ -1207,6 +1372,14 @@ void MainWindow::maximizePackagesTreeView(bool pSaveSettings)
 }
 
 /*
+ * Maximizes/de-maximizes terminal tab
+ */
+void MainWindow::maximizeTerminalTab()
+{
+  maximizePropertiesTabWidget(false);
+}
+
+/*
  * Maximizes/de-maximizes the lower pane (tabwidget)
  */
 void MainWindow::maximizePropertiesTabWidget(bool pSaveSettings)
@@ -1233,11 +1406,16 @@ void MainWindow::maximizePropertiesTabWidget(bool pSaveSettings)
 
     if (ui->twProperties->currentIndex() == ctn_TABINDEX_FILES)
     {
-      QTreeView *tv = ui->twProperties->currentWidget()->findChild<QTreeView *>("tvPkgFileList") ;
+      QTreeView *tv = ui->twProperties->currentWidget()->findChild<QTreeView *>("tvPkgFileList");
       if (tv)
         tv->scrollTo(tv->currentIndex());
     }
-
+#ifdef QTERMWIDGET
+    else if(ui->twProperties->currentIndex() == ctn_TABINDEX_TERMINAL)
+    {
+      m_console->setFocus();
+    }
+#endif
     if(pSaveSettings)
       saveSettings(ectn_NORMAL);
   }
@@ -1259,9 +1437,9 @@ void MainWindow::headerViewPackageListSortIndicatorClicked( int col, Qt::SortOrd
           SLOT(headerViewPackageListSortIndicatorClicked(int,Qt::SortOrder)));
 
   if (isAURGroupSelected())
-    saveSettings(ectn_AUR_PackageList);
+    saveSettings(ectn_AUR_PACKAGELIST);
   else
-    saveSettings(ectn_PackageList);
+    saveSettings(ectn_PACKAGELIST);
 }
 
 /*
@@ -1271,7 +1449,6 @@ void MainWindow::positionTextEditCursorAtEnd()
 {
   QTextBrowser *textEdit =
       ui->twProperties->widget(ctn_TABINDEX_OUTPUT)->findChild<QTextBrowser*>("textBrowser");
-
   if (textEdit)
   {
     utils::positionTextEditCursorAtEnd(textEdit);
@@ -1350,6 +1527,7 @@ void MainWindow::openFile()
   {
     QString path = utils::showFullPathOfItem(tv->currentIndex());
     QFileInfo file(path);
+
     if (file.isFile())
     {
       WMHelper::openFile(path);
@@ -1424,7 +1602,15 @@ void MainWindow::installLocalPackage()
 }
 
 /*
- * Brings the user to the tab Files and position cursor inside searchBar
+ * Brings the user to the Info tab
+ */
+void MainWindow::showPackageInfo()
+{
+  refreshTabInfo(false, true);
+}
+
+/*
+ * Brings the user to the Files tab and position cursor inside searchBar
  * so he can find any file the selected package may have
  */
 void MainWindow::findFileInPackage()
@@ -1473,6 +1659,12 @@ QString MainWindow::getSelectedDirectory()
  */
 void MainWindow::tvPackagesSelectionChanged(const QItemSelection&, const QItemSelection&)
 {
+  if (m_packageModel->getPackageCount() == 0)
+  {
+    clearStatusBar();
+    return;
+  }
+
   const QItemSelectionModel*const selection = ui->tvPackages->selectionModel();
   const int selected = selection != NULL ? selection->selectedRows().count() : 0;
 
@@ -1514,7 +1706,7 @@ void MainWindow::launchPLV()
 void MainWindow::launchRepoEditor()
 {
   m_unixCommand = new UnixCommand(this);
-  m_unixCommand->executeCommand(QLatin1String("octopi-repoeditor"), ectn_LANG_USER_DEFINED);
+  m_unixCommand->execCommandAsNormalUser(QLatin1String("octopi-repoeditor"));
 }
 
 /*
@@ -1527,173 +1719,244 @@ void MainWindow::launchCacheCleaner()
 }
 
 /*
- * Makes a gist with a bunch of system file contents.
+ * Makes a ptpb with a bunch of system file contents.
  */
-void MainWindow::gistSysInfo()
+void MainWindow::ptpbSysInfo()
 {
-  if (!UnixCommand::hasTheExecutable("gist") ||
+  if (!UnixCommand::hasTheExecutable("curl") ||
       m_commandExecuting != ectn_NONE) return;
 
-  CPUIntensiveComputing *cic = new CPUIntensiveComputing(this);
+  if (!isInternetAvailable()) return;
+
+  //Asks user if he/she is sure about doing this
+  int res = QMessageBox::question(this, StrConstants::getConfirmation(),
+                                  StrConstants::getDoYouAgreeToUsePtpb(),
+                                  QMessageBox::Yes | QMessageBox::No,
+                                  QMessageBox::No);
+  if (res == QMessageBox::No) return;
 
   disableTransactionActions();
-  QTime time = QTime::currentTime();
-  qsrand(time.minute() + time.second() + time.msec());
-  QFile *tempFile = new QFile(ctn_TEMP_ACTIONS_FILE + QString::number(qrand()));
-  tempFile->open(QIODevice::ReadWrite|QIODevice::Text);
-  tempFile->setPermissions(QFile::Permissions(QFile::ExeOwner|QFile::ReadOwner));
+  m_commandExecuting = ectn_SYSINFO;
+  clearTabOutput();
+  writeToTabOutput("<b>SysInfo...</b><br>");
 
-  QString hostname = UnixCommand::getCommandOutput("hostname");
+  QString command;
+  QEventLoop el;
+  QFuture<QByteArray> f;
+  command="hostname";
+  f = QtConcurrent::run(execCommandInAnotherThread, command);
+  connect(&g_fwCommandToExecute, SIGNAL(finished()), &el, SLOT(quit()));
+  g_fwCommandToExecute.setFuture(f);
+  el.exec();
+  QString hostname = g_fwCommandToExecute.result();
+
   hostname.remove("\n");
   QString homePath = QDir::homePath();
   QByteArray out;
 
   if (UnixCommand::getLinuxDistro() == ectn_KAOS)
   {
-    tempFile->write("----------------------------------------------------------------------------------------------------------\n");
-    tempFile->write("cat /etc/KaOS-release\n");
-    tempFile->write("----------------------------------------------------------------------------------------------------------\n\n");
-    out = UnixCommand::getCommandOutput("cat /etc/KaOS-release");
+    out += "----------------------------------------------------------------------------------------------------------\n";
+    out += "cat /etc/KaOS-release\n";
+    out += "----------------------------------------------------------------------------------------------------------\n\n";
+
+    command = "cat /etc/KaOS-release";
+    f = QtConcurrent::run(execCommandInAnotherThread, command);
+    connect(&g_fwCommandToExecute, SIGNAL(finished()), &el, SLOT(quit()));
+    g_fwCommandToExecute.setFuture(f);
+    el.exec();
+    out += g_fwCommandToExecute.result();
 
     out.replace(hostname, "<HOSTNAME>");
     out.replace(homePath, "<HOME_PATH>");
-
-    tempFile->write(out);
-    tempFile->write("\n\n");
+    out += "\n\n";
   }
   else
   {
-    tempFile->write("----------------------------------------------------------------------------------------------------------\n");
-    tempFile->write("cat /etc/lsb-release\n");
-    tempFile->write("----------------------------------------------------------------------------------------------------------\n\n");
-    out = UnixCommand::getCommandOutput("cat /etc/lsb-release");
+    out += "----------------------------------------------------------------------------------------------------------\n";
+    out += "cat /etc/lsb-release\n";
+    out += "----------------------------------------------------------------------------------------------------------\n\n";
+
+    command = "cat /etc/lsb-release";
+    f = QtConcurrent::run(execCommandInAnotherThread, command);
+    connect(&g_fwCommandToExecute, SIGNAL(finished()), &el, SLOT(quit()));
+    g_fwCommandToExecute.setFuture(f);
+    el.exec();
+    out += g_fwCommandToExecute.result();
 
     out.replace(hostname, "<HOSTNAME>");
     out.replace(homePath, "<HOME_PATH>");
-
-    tempFile->write(out);
-    tempFile->write("\n\n");
+    out += "\n\n";
   }
 
   if (UnixCommand::hasTheExecutable("inxi"))
   {
-    tempFile->write("----------------------------------------------------------------------------------------------------------\n");
-    tempFile->write("inxi -Fxz\n");
-    tempFile->write("----------------------------------------------------------------------------------------------------------\n\n");
-    out = UnixCommand::getCommandOutput("inxi -Fxz -c 0");
+    out += "----------------------------------------------------------------------------------------------------------\n";
+    out += "inxi -Fxz\n";
+    out += "----------------------------------------------------------------------------------------------------------\n\n";
+
+    command = "inxi -Fxz -c 0";
+    f = QtConcurrent::run(execCommandInAnotherThread, command);
+    connect(&g_fwCommandToExecute, SIGNAL(finished()), &el, SLOT(quit()));
+    g_fwCommandToExecute.setFuture(f);
+    el.exec();
+    out += g_fwCommandToExecute.result();
 
     out.replace(hostname, "<HOSTNAME>");
     out.replace(homePath, "<HOME_PATH>");
-
-    tempFile->write(out);
-    tempFile->write("\n\n");
+    out += "\n\n";
   }
   else
   {
-    tempFile->write("----------------------------------------------------------------------------------------------------------\n");
-    tempFile->write("uname -a\n");
-    tempFile->write("----------------------------------------------------------------------------------------------------------\n\n");
-    out = UnixCommand::getCommandOutput("uname -a");
+    out += "----------------------------------------------------------------------------------------------------------\n";
+    out += "uname -a\n";
+    out += "----------------------------------------------------------------------------------------------------------\n\n";
+
+    command = "uname -a";
+    f = QtConcurrent::run(execCommandInAnotherThread, command);
+    connect(&g_fwCommandToExecute, SIGNAL(finished()), &el, SLOT(quit()));
+    g_fwCommandToExecute.setFuture(f);
+    el.exec();
+    out += g_fwCommandToExecute.result();
 
     out.replace(hostname, "<HOSTNAME>");
     out.replace(homePath, "<HOME_PATH>");
-
-    tempFile->write(out);
-    tempFile->write("\n\n");
+    out += "\n\n";
   }
 
   if (UnixCommand::hasTheExecutable("mhwd"))
   {
-    tempFile->write("----------------------------------------------------------------------------------------------------------\n");
-    tempFile->write("mhwd -li -d\n");
-    tempFile->write("----------------------------------------------------------------------------------------------------------\n\n");
-    out = UnixCommand::getCommandOutput("mhwd -li -d");
+    out += "----------------------------------------------------------------------------------------------------------\n";
+    out += "mhwd -li -d\n";
+    out += "----------------------------------------------------------------------------------------------------------\n\n";
+
+    command = "mhwd -li -d";
+    f = QtConcurrent::run(execCommandInAnotherThread, command);
+    connect(&g_fwCommandToExecute, SIGNAL(finished()), &el, SLOT(quit()));
+    g_fwCommandToExecute.setFuture(f);
+    el.exec();
+    out += g_fwCommandToExecute.result();
 
     //out.replace(hostname, "<HOSTNAME>");
     out.replace(homePath, "<HOME_PATH>");
-
-    tempFile->write(out);
-    tempFile->write("\n\n");
+    out += "\n\n";
   }
 
-  tempFile->write("----------------------------------------------------------------------------------------------------------\n");
-  tempFile->write("journalctl -b -p err\n");
-  tempFile->write("----------------------------------------------------------------------------------------------------------\n\n");
-  out = UnixCommand::getCommandOutput("journalctl -b -p err");
+  out += "----------------------------------------------------------------------------------------------------------\n";
+  out += "journalctl -b -p err\n";
+  out += "----------------------------------------------------------------------------------------------------------\n\n";
+
+  command = "journalctl -b -p err";
+  f = QtConcurrent::run(execCommandInAnotherThread, command);
+  connect(&g_fwCommandToExecute, SIGNAL(finished()), &el, SLOT(quit()));
+  g_fwCommandToExecute.setFuture(f);
+  el.exec();
+  out += g_fwCommandToExecute.result();
 
   out.replace(hostname, "<HOSTNAME>");
   out.replace(homePath, "<HOME_PATH>");
+  out += "\n\n";
 
-  tempFile->write(out);
-  tempFile->write("\n\n");
+  out += "----------------------------------------------------------------------------------------------------------\n";
+  out += "cat /etc/pacman.conf\n";
+  out += "----------------------------------------------------------------------------------------------------------\n\n";
 
-  tempFile->write("----------------------------------------------------------------------------------------------------------\n");
-  tempFile->write("cat /etc/pacman.conf\n");
-  tempFile->write("----------------------------------------------------------------------------------------------------------\n\n");
-  out = UnixCommand::getCommandOutput("cat /etc/pacman.conf");
-
-  //out.replace(hostname, "<HOSTNAME>");
-  out.replace(homePath, "<HOME_PATH>");
-
-  tempFile->write(out);
-  tempFile->write("\n\n");
-
-  tempFile->write("----------------------------------------------------------------------------------------------------------\n");
-  tempFile->write("pacman -Qm\n");
-  tempFile->write("----------------------------------------------------------------------------------------------------------\n\n");
-  out = UnixCommand::getCommandOutput("pacman -Qm");
+  command = "cat /etc/pacman.conf";
+  f = QtConcurrent::run(execCommandInAnotherThread, command);
+  connect(&g_fwCommandToExecute, SIGNAL(finished()), &el, SLOT(quit()));
+  g_fwCommandToExecute.setFuture(f);
+  el.exec();
+  out += g_fwCommandToExecute.result();
 
   //out.replace(hostname, "<HOSTNAME>");
   out.replace(homePath, "<HOME_PATH>");
+  out += "\n\n";
 
-  tempFile->write(out);
-  tempFile->write("\n\n");
+  out += "----------------------------------------------------------------------------------------------------------\n";
+  out += "pacman -Qm\n";
+  out += "----------------------------------------------------------------------------------------------------------\n\n";
+
+  command = "pacman -Qm";
+  f = QtConcurrent::run(execCommandInAnotherThread, command);
+  connect(&g_fwCommandToExecute, SIGNAL(finished()), &el, SLOT(quit()));
+  g_fwCommandToExecute.setFuture(f);
+  el.exec();
+  out += g_fwCommandToExecute.result();
+
+  //out.replace(hostname, "<HOSTNAME>");
+  out.replace(homePath, "<HOME_PATH>");
+  out += "\n\n";
 
   if (UnixCommand::getLinuxDistro() == ectn_KAOS)
   {
-    tempFile->write("----------------------------------------------------------------------------------------------------------\n");
-    tempFile->write("cat /var/log/pacman.log\n");
-    tempFile->write("----------------------------------------------------------------------------------------------------------\n\n");
-    out = UnixCommand::getCommandOutput("cat /var/log/pacman.log");
+    out += "----------------------------------------------------------------------------------------------------------\n";
+    out += "cat /var/log/pacman.log\n";
+    out += "----------------------------------------------------------------------------------------------------------\n\n";
+
+    command = "cat /var/log/pacman.log";
+    f = QtConcurrent::run(execCommandInAnotherThread, command);
+    connect(&g_fwCommandToExecute, SIGNAL(finished()), &el, SLOT(quit()));
+    g_fwCommandToExecute.setFuture(f);
+    el.exec();
+    out += g_fwCommandToExecute.result();
+
     //out.replace(hostname, "<HOSTNAME>");
     out.replace(homePath, "<HOME_PATH>");
-    tempFile->write(out);
-    tempFile->flush();
+    out += "\n\n";
 
-    tempFile->write("\n\n");
-    tempFile->write("----------------------------------------------------------------------------------------------------------\n");
-    tempFile->write("cat /var/log/installation.log\n");
-    tempFile->write("----------------------------------------------------------------------------------------------------------\n\n");
-    out = UnixCommand::getCommandOutput("cat /var/log/installation.log");
+    out += "----------------------------------------------------------------------------------------------------------\n";
+    out += "cat /var/log/installation.log\n";
+    out += "----------------------------------------------------------------------------------------------------------\n\n";
+
+    command = "cat /var/log/installation.log";
+    f = QtConcurrent::run(execCommandInAnotherThread, command);
+    connect(&g_fwCommandToExecute, SIGNAL(finished()), &el, SLOT(quit()));
+    g_fwCommandToExecute.setFuture(f);
+    el.exec();
+    out += g_fwCommandToExecute.result();
     out.replace(hostname, "<HOSTNAME>");
     out.replace(homePath, "<HOME_PATH>");
-
-    tempFile->write(out);
-    tempFile->flush();
-    tempFile->close();
+    QString aux = QString::fromLatin1(out.data());
+    QByteArray aba;
+    aba += aux;
   }
   else
   {
-    tempFile->write("----------------------------------------------------------------------------------------------------------\n");
-    tempFile->write("head --bytes=256K /var/log/pacman.log\n");
-    tempFile->write("----------------------------------------------------------------------------------------------------------\n\n");
-    out = UnixCommand::getCommandOutput("head --bytes=256K /var/log/pacman.log");
-    //out.replace(hostname, "<HOSTNAME>");
-    out.replace(homePath, "<HOME_PATH>");
+    out += "----------------------------------------------------------------------------------------------------------\n";
+    out += "head --bytes=256K /var/log/pacman.log\n";
+    out += "----------------------------------------------------------------------------------------------------------\n\n";
 
-    tempFile->write(out);
-    tempFile->flush();
-    tempFile->close();
+    command = "head --bytes=256K /var/log/pacman.log";
+    f = QtConcurrent::run(execCommandInAnotherThread, command);
+    connect(&g_fwCommandToExecute, SIGNAL(finished()), &el, SLOT(quit()));
+    g_fwCommandToExecute.setFuture(f);
+    el.exec();
+    out += g_fwCommandToExecute.result();
+    out.replace(hostname, "<HOSTNAME>");
+    out.replace(homePath, "<HOME_PATH>");
   }
 
+  QFuture<QString> f2 = QtConcurrent::run(generateSysInfo, out);
+  connect(&g_fwGenerateSysInfo, SIGNAL(finished()), &el, SLOT(quit()));
+  g_fwGenerateSysInfo.setFuture(f2);
+  el.exec();
+
+  m_commandExecuting = ectn_NONE;
+  QString result = g_fwGenerateSysInfo.result();
+
+  QRegularExpression re;
+  re.setPattern("uuid: (.*)\\n");
+  QRegularExpressionMatch m = re.match(result);
+  QString uuid = m.captured(1);
+
+  if (!uuid.isEmpty())
+  {
+    result += "<br>delete command: curl -X DELETE https://ptpb.pw/" + uuid;
+  }
+
+  writeToTabOutput("<br>" + result + "<br>");
+  writeToTabOutput("<br><b>" + StrConstants::getCommandFinishedOK() + "</b><br>");
   enableTransactionActions();
-
-  //Now we gist the temp file just created!
-  QString gist = UnixCommand::getCommandOutput("gist " + tempFile->fileName());
-  delete cic;
-
-  QString distroPrettyName = UnixCommand::getLinuxDistroPrettyName();
-  QMessageBox::information(this, distroPrettyName + " SysInfo", Package::makeURLClickable(gist), QMessageBox::Ok);
 }
 
 /*

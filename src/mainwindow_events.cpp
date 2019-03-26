@@ -31,6 +31,8 @@
 #include "searchbar.h"
 #include "globals.h"
 #include "terminal.h"
+#include "termwidget.h"
+#include "settingsmanager.h"
 
 #include <QCloseEvent>
 #include <QMessageBox>
@@ -40,6 +42,7 @@
 #include <QTextBrowser>
 #include <QFutureWatcher>
 #include <QClipboard>
+#include <QProgressBar>
 #include <QtConcurrent/QtConcurrentRun>
 
 /*
@@ -50,10 +53,18 @@ void MainWindow::closeEvent(QCloseEvent *event)
   //We cannot quit while there is a running transaction!
   if(m_commandExecuting != ectn_NONE)
   {
-    QMessageBox::information(this, StrConstants::getAttention(),
-                             StrConstants::getThereIsAPendingTransaction(),
-                             QMessageBox::Ok, QMessageBox::Ok);
-    event->ignore();
+    int res = QMessageBox::question(this, StrConstants::getConfirmation(),
+                          StrConstants::getThereIsARunningTransaction() + "\n" +
+                          StrConstants::getDoYouReallyWantToQuit(),
+                          QMessageBox::Yes | QMessageBox::No,
+                          QMessageBox::No);
+    if (res == QMessageBox::Yes)
+    {
+      stopTransaction();
+      event->accept();
+      qApp->quit();
+    }
+    else event->ignore();
   }
   else if(isThereAPendingTransaction())
   {
@@ -111,10 +122,20 @@ void MainWindow::keyPressEvent(QKeyEvent* ke)
     {
       execKeyActionOnPackage(ectn_INSTALL);
     }
+    else if (!isSearchByFileSelected() && !isAURGroupSelected() && m_leFilterPackage->hasFocus() && !ui->actionUseInstantSearch->isChecked())
+    {
+      reapplyPackageFilter();
+    }
     //We are searching for AUR foreign packages...
     else if (isAURGroupSelected() && m_leFilterPackage->hasFocus() && m_cic == NULL)
     {
-      if (UnixCommand::getLinuxDistro() == ectn_KAOS) return;
+      if (UnixCommand::getLinuxDistro() == ectn_KAOS && ui->actionUseInstantSearch->isChecked()) return;
+
+      if (!isInternetAvailable()) return;
+
+      m_progressWidget->setMaximum(100);
+      m_progressWidget->setValue(0);
+      m_progressWidget->show();
 
       ui->twGroups->setEnabled(false);
 
@@ -188,6 +209,14 @@ void MainWindow::keyPressEvent(QKeyEvent* ke)
   {
     changeTabWidgetPropertiesIndex(ctn_TABINDEX_HELPUSAGE);
   }
+
+#ifdef QTERMWIDGET  //BEGIN OF QTERMWIDGET CODE
+  else if(ke->key() == Qt::Key_7 && ke->modifiers() == Qt::AltModifier)
+  {
+    changeTabWidgetPropertiesIndex(ctn_TABINDEX_TERMINAL);
+  }
+#endif
+
   else if(ke->key() == Qt::Key_F2)
   {
     if (isPackageTreeViewVisible())
@@ -204,6 +233,10 @@ void MainWindow::keyPressEvent(QKeyEvent* ke)
   {
     openTerminal();
   }
+  else if(ke->key() == Qt::Key_F5)
+  {
+    metaBuildPackageList();
+  }
   else if(ke->key() == Qt::Key_F6)
   {
     openDirectory();
@@ -212,7 +245,7 @@ void MainWindow::keyPressEvent(QKeyEvent* ke)
   {
     maximizePackagesTreeView(false);
   }
-  else if (ke->key() == Qt::Key_F12)
+  else if (ke->key() == Qt::Key_F11)
   {
     maximizePropertiesTabWidget(false);
   }
@@ -268,27 +301,13 @@ void MainWindow::keyPressEvent(QKeyEvent* ke)
     }
   }
   else if(ke->key() == Qt::Key_Y && ke->modifiers() == (Qt::ShiftModifier|Qt::ControlModifier)
-          && m_hasAURTool)
+          && m_hasAURTool && m_actionSwitchToAURTool->isEnabled())
   {
     if (m_commandExecuting != ectn_NONE) return;
 
     //The user wants to use "AUR tool" to search for pkgs
     m_actionSwitchToAURTool->trigger();
-    if (m_actionSwitchToAURTool->isChecked() && UnixCommand::getLinuxDistro() != ectn_KAOS)
-    {
-      m_leFilterPackage->setFocus();
-    }
-    else
-    {
-      ui->tvPackages->setFocus();
-    }
-  }
-  else if(ke->key() == Qt::Key_C && ke->modifiers() == (Qt::ShiftModifier|Qt::ControlModifier))
-  {
-    if (m_commandExecuting == ectn_NONE)
-    {
-      doCleanCache(); //If we are not executing any command, let's clean the cache
-    }
+    m_leFilterPackage->setFocus();
   }
   else if(ke->key() == Qt::Key_R && ke->modifiers() == (Qt::ShiftModifier|Qt::ControlModifier))
   {
@@ -299,44 +318,11 @@ void MainWindow::keyPressEvent(QKeyEvent* ke)
   } 
   else if(ke->key() == Qt::Key_S && ke->modifiers() == (Qt::ShiftModifier|Qt::ControlModifier))
   {
-    gistSysInfo();
+    ptpbSysInfo();
   }
-
-  /*else if(ke->key() == Qt::Key_T && ke->modifiers() == (Qt::ShiftModifier|Qt::ControlModifier)
-          && m_initializationCompleted)
-  {
-    if (m_commandExecuting != ectn_NONE) return;
-
-    OptionsDialog *od = new OptionsDialog(this);
-    int res = od->exec();
-    if (res) refreshAppIcon();
-  }*/
 
   else ke->ignore();
 }
-
-/*
- * Calls TerminalSelectorDialog to let user chooses which terminal to use with Octopi
- */
-/*int MainWindow::selectTerminal(const int initialTerminalIndex)
-{
-  int result = initialTerminalIndex;
-  std::unique_ptr<TerminalSelectorDialog> d(
-        new TerminalSelectorDialog(this, Terminal::getListOfAvailableTerminals()));
-
-  d->setInitialTerminalIndex(initialTerminalIndex);
-
-  if (d->exec() == QDialog::Accepted)
-  {
-    result = d->selectedTerminalIndex();
-  }
-  else
-  {
-    result = initialTerminalIndex;
-  }
-
-  return result;
-}*/
 
 /*
  * This Event method is called whenever the user releases a key
@@ -356,6 +342,7 @@ void MainWindow::keyReleaseEvent(QKeyEvent* ke)
   }
   else if(ke->key() == Qt::Key_Home && ke->modifiers() == Qt::AltModifier)
   {
+    if (!m_leFilterPackage->text().isEmpty()) m_leFilterPackage->clear();
     m_indOfVisitedPackage = 0;
 
     if (!m_listOfVisitedPackages.isEmpty())
@@ -363,6 +350,7 @@ void MainWindow::keyReleaseEvent(QKeyEvent* ke)
   }
   else if(ke->key() == Qt::Key_Left && ke->modifiers() == Qt::AltModifier)
   {
+    if (!m_leFilterPackage->text().isEmpty()) m_leFilterPackage->clear();
     if (m_indOfVisitedPackage > 0)
     {
       --m_indOfVisitedPackage;
@@ -373,6 +361,7 @@ void MainWindow::keyReleaseEvent(QKeyEvent* ke)
   }
   else if(ke->key() == Qt::Key_Right && ke->modifiers() == Qt::AltModifier)
   {
+    if (!m_leFilterPackage->text().isEmpty()) m_leFilterPackage->clear();
     if (m_indOfVisitedPackage < (m_listOfVisitedPackages.count()-1))
     {
       ++m_indOfVisitedPackage;
@@ -383,6 +372,7 @@ void MainWindow::keyReleaseEvent(QKeyEvent* ke)
   }
   else if(ke->key() == Qt::Key_End && ke->modifiers() == Qt::AltModifier)
   {
+    if (!m_leFilterPackage->text().isEmpty()) m_leFilterPackage->clear();
     m_indOfVisitedPackage = m_listOfVisitedPackages.count()-1;
 
     if (!m_listOfVisitedPackages.isEmpty())

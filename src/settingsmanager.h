@@ -62,16 +62,36 @@ class SettingsManager
     static int getPackageVersionColumnWidth();
     static int getPackageRepositoryColumnWidth();
 
-    static bool getUseDefaultAppIcon();
+    static bool getUseDefaultAppIcon();    
     static QString getOctopiBusyIconPath();
     static QString getOctopiRedIconPath();
     static QString getOctopiYellowIconPath();
     static QString getOctopiGreenIconPath();
+
+    static bool getShowPackageNumbersOutput();
+    static bool getShowStopTransaction();
+
+    static QString getAURTool();
+    static QString getAURToolName();
+    static bool getPacaurNoConfirmParam();
+    static bool getPacaurNoEditParam();
+    static bool getYaourtNoConfirmParam();
+    static bool getTrizenNoConfirmParam();
+    static bool getTrizenNoEditParam();
+    static bool getSearchOutdatedAURPackages();
+
+    static int getConsoleFontSize();
+    static QString readSUToolValue();
+    static QString getSUTool();
     static bool hasPacmanBackend();
 
     //CacheCleaner related
+    static QByteArray getCacheCleanerWindowSize();
     static int getKeepNumInstalledPackages();
     static int getKeepNumUninstalledPackages();
+    static void setCacheCleanerWindowSize(QByteArray newValue);
+    static void setKeepNumInstalledPackages(int newValue);
+    static void setKeepNumUninstalledPackages(int newValue);
 
     //Notifier related
     static int getSyncDbHour();
@@ -82,14 +102,16 @@ class SettingsManager
 
     static QByteArray getWindowSize();
     static QByteArray getTransactionWindowSize();
+    static QByteArray getOutputDialogWindowSize();
     static QByteArray getOptionalDepsWindowSize();
     static QByteArray getSplitterHorizontalState();
 
+    static bool isValidSUToolSelected();
     static bool isValidTerminalSelected();
+    static bool isInstantSearchSelected();
 
     static void setCurrentTabIndex(int newValue);
     static void setPanelOrganizing(int newValue);
-
     static void setUseDefaultAppIcon(bool newValue);
     static void setOctopiBusyIconPath(const QString& newValue);
     static void setOctopiRedIconPath(const QString& newValue);
@@ -105,6 +127,7 @@ class SettingsManager
     static void setShowGroupsPanel(int newValue);
     static void setWindowSize(QByteArray newValue);
     static void setTransactionWindowSize(QByteArray newValue);
+    static void setOutputDialogWindowSize(QByteArray newValue);
     static void setOptionalDepsWindowSize(QByteArray newValue);
     static void setSplitterHorizontalState(QByteArray newValue);
 
@@ -113,13 +136,24 @@ class SettingsManager
     static void setLastSyncDbTime(QDateTime newValue);
 
     static void setTerminal(const QString& newValue);
-    static void setKeepNumInstalledPackages(int newValue);
-    static void setKeepNumUninstalledPackages(int newValue);
-
     static void setPackageIconColumnWidth(int newValue);
     static void setPackageNameColumnWidth(int newValue);
     static void setPackageVersionColumnWidth(int newValue);
     static void setPackageRepositoryColumnWidth(int newValue);
+
+    static void setShowPackageNumbersOutput(bool newValue);
+    static void setShowStopTransaction(bool newValue);
+
+    static void setAURTool(const QString& newValue);        
+    static void setPacaurNoConfirmParam(bool newValue);
+    static void setPacaurNoEditParam(bool newValue);
+    static void setYaourtNoConfirmParam(bool newValue);
+    static void setTrizenNoConfirmParam(bool newValue);
+    static void setTrizenNoEditParam(bool newValue);
+    static void setSearchOutdatedAURPackages(bool newValue);
+    static void setSUTool(const QString& newValue);
+    static void setInstantSearchSelected(bool newValue);
+    static void setConsoleFontSize(int newValue);
 };
 
 #endif // SETTINGSMANAGER_H

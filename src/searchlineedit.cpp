@@ -15,7 +15,7 @@
 #include <QApplication>
 #include <QToolButton>
 #include <QStyle>
-#include <QRegExpValidator>
+#include <QRegularExpressionValidator>
 #include <QCompleter>
 #include <QStringListModel>
 
@@ -29,6 +29,8 @@ SearchLineEdit::SearchLineEdit(QWidget *parent, bool hasSLocate) :
   m_completer->setCompletionMode(QCompleter::PopupCompletion);
   m_completer->setCompletionColumn(0);
   m_completer->setMaxVisibleItems(10);
+  m_validatorType = ectn_DEFAULT_VALIDATOR;
+
   setCompleter(m_completer);
 
   // Create the search button and set its icon, cursor, and stylesheet
@@ -43,9 +45,9 @@ SearchLineEdit::SearchLineEdit(QWidget *parent, bool hasSLocate) :
   this->m_SearchButton->setCursor(Qt::ArrowCursor);
   this->m_SearchButton->setStyleSheet(this->buttonStyleSheetForCurrentState());
 
-  m_defaultValidator = new QRegExpValidator(QRegExp("[a-zA-Z0-9_\\-\\$\\^\\*\\+\\(\\)\\[\\]\\.\\s\\\\]+"), this);
-  m_aurValidator = new QRegExpValidator(QRegExp("[a-zA-Z0-9_\\-\\+\\s\\\\]+"), this);
-  m_fileValidator = new QRegExpValidator(QRegExp("[a-zA-Z0-9_\\-\\/\\.]+"), this);
+  m_defaultValidator = new QRegularExpressionValidator(QRegularExpression("[a-zA-Z0-9_\\-\\$\\^\\*\\+\\(\\)\\[\\]\\.\\s\\\\]+"), this);
+  m_aurValidator = new QRegularExpressionValidator(QRegularExpression("[a-zA-Z0-9_\\-\\+\\s\\\\]+"), this);
+  m_fileValidator = new QRegularExpressionValidator(QRegularExpression("[a-zA-Z0-9_\\-\\/\\.]+"), this);
 
   setValidator(m_defaultValidator);
 
@@ -69,11 +71,15 @@ void SearchLineEdit::setRefreshValidator(ValidatorType validatorType)
   else if (validatorType == ectn_DEFAULT_VALIDATOR)
     setValidator(m_defaultValidator);
 
+  if (m_validatorType == validatorType) return;
+
   //If the current string is not valid anymore, let's erase it!
   int pos = 0;
   QString search = text();
   if (this->validator()->validate(search, pos) == QValidator::Invalid)
     setText("");
+
+  m_validatorType = validatorType;
 }
 
 /*

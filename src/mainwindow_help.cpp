@@ -61,7 +61,6 @@ void MainWindow::initTabHelpUsage()
         QString("<a href=\"http://www.gnu.org/licenses/gpl-2.0.html\">GPL v2</a>.</p></h3>") +
       QString("<h4><p>") + strForMoreInfo + " " +
       QString("<a href=\"http://octopiproject.wordpress.com\">http://octopiproject.wordpress.com</a>.</p></h4><br>");
-
     html += tr("Package classification:") +
 
   QString("<ul type=\"square\"><li>") + iconPath + "installed.png\"/> " +
@@ -113,13 +112,11 @@ void MainWindow::initTabHelpUsage()
   QString("<ul><li>") +
      tr("Ctrl+D or 'File/Sync database' to sync the local database with latest remote changes (pacman -Sy)") +
   QString("</li><li>") +
-     tr("Ctrl+U or 'File/System upgrade' to make a full system upgrade (pacman -Su)") +
+     tr("Ctrl+P or 'File/System upgrade' to make a full system upgrade (pacman -Su)") +
   QString("</li><li>") +
      tr("Ctrl+L to find a package in the package list") +
   QString("</li><li>") +
      tr("Ctrl+F to search for text inside tab Files, News and Usage") +
-  //QString("</li><li>") +
-  //   tr("Ctrl+N or 'View/Non installed' to show/hide non installed packages") +
   QString("</li><li>") +
      tr("Ctrl+M or 'Transaction/Commit' to start installation/removal of selected packages") +
   QString("</li><li>") +
@@ -131,8 +128,9 @@ void MainWindow::initTabHelpUsage()
   QString("</li></ul>") +
 
      tr("Control+shift+key sequences:") +
-  QString("<ul><li>") +
-     tr("Ctrl+Shift+C to clean local packages cache (pacman -Sc)") +
+  QString("<ul>") +
+  //QString("<ul><li>") +
+  //   tr("Ctrl+Shift+C to clean local packages cache (pacman -Sc)") +
   QString("</li><li>") +
      tr("Ctrl+Shift+G to display all package groups") +
   QString("</li><li>") +
@@ -151,7 +149,7 @@ void MainWindow::initTabHelpUsage()
   QString("</li><li>") +
      tr("F10 to maximize/demaximize package list view") +
   QString("</li><li>") +
-     tr("F12 to maximize/demaximize Tab's view") +
+     tr("F11 to maximize/demaximize Tab's view") +
   QString("</li></ul>");
 
   text->setText(html);
@@ -184,12 +182,18 @@ void MainWindow::onHelpUsage()
 void MainWindow::onHelpAbout()
 {
   QString aboutText =
-      "<b>" + StrConstants::getApplicationName() +
-      " - " + StrConstants::getApplicationVersion() + "</b>" + " (" + StrConstants::getQtVersion() + ")<br>";
-  aboutText += "<a href=\"http://octopiproject.wordpress.com/\">http://octopiproject.wordpress.com</a><br>";
+      "<b>" + StrConstants::getApplicationName() + "</b><br>";
+
+  aboutText += StrConstants::getVersion() + ": " + StrConstants::getApplicationVersion() + " - " + StrConstants::getQtVersion() + "<br>";
+  aboutText += StrConstants::getURL() + ": " + "<a href=\"http://octopiproject.wordpress.com/\">http://octopiproject.wordpress.com</a><br>";
+  aboutText += StrConstants::getLicenses() + ": " + QString("<a href=\"http://www.gnu.org/licenses/gpl-2.0.html\">GPL v2</a><br>");
   aboutText += "&copy; Alexandre Albuquerque Arnt<br><br>";
-  aboutText += "<b>Pacman - " + UnixCommand::getPacmanVersion() + "</b><br>";
-  aboutText += "<a href=\"https://www.archlinux.org/pacman/\">https://www.archlinux.org/pacman</a><br>";
+
+  aboutText += "<b>Pacman</b><br>";
+  QString pacmanV = UnixCommand::getPacmanVersion();
+  if (pacmanV.at(0) == 'v') pacmanV.remove(0, 1);
+  aboutText += StrConstants::getVersion() + ": " + pacmanV + "<br>";
+  aboutText += StrConstants::getURL() + ": " + "<a href=\"https://www.archlinux.org/pacman/\">https://www.archlinux.org/pacman</a><br>";
   QDate d = QDate::currentDate();
   aboutText += "&copy; 2006-%1 Pacman Development Team<br>";
   aboutText += "&copy; 2002-2006 Judd Vinet";

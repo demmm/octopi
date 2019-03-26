@@ -27,18 +27,20 @@ private:
   QStringListModel *m_completerModel;
 
   QCompleter *m_completer;
+  ValidatorType m_validatorType;
   QValidator *m_defaultValidator;
   QValidator *m_aurValidator;
   QValidator *m_fileValidator;
   QToolButton *m_SearchButton;
-  QString styleSheetForCurrentState();  
+
+  QString styleSheetForCurrentState();
   QString buttonStyleSheetForCurrentState() const;
 
 private slots:
   void updateSearchButton(const QString &text);
 
 protected:
-  void resizeEvent(QResizeEvent *event);
+  virtual void resizeEvent(QResizeEvent *event);
 
 public:
   explicit SearchLineEdit(QWidget *parent = NULL, bool hasSLocate = false);

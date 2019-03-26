@@ -32,10 +32,21 @@ class PacmanExec : public QObject
 private:
   bool m_iLoveCandy;
   bool m_debugMode;
+  //This variable holds total number of packages to be downloaded/removed
+  int m_numberOfPackages;
+  //This variable counts the package number being downloaded/removed
+  int m_packageCounter;
+  //This variable counts the number of "error: failed retrieving file" strings
+  int m_errorRetrievingFileCounter;
+
+  //This flag holds TRUE if the parser is parsing a package removal operation
+  bool m_parsingAPackageChange;
   UnixCommand *m_unixCommand;
   CommandExecuting m_commandExecuting;
   QStringList m_lastCommandList; //run in terminal commands
   QStringList m_textPrinted;
+
+  bool m_processWasCanceled;
 
   bool searchForKeyVerbs(QString output);
   bool splitOutputStrings(QString output);
@@ -54,11 +65,15 @@ public:
   virtual ~PacmanExec();
 
   void setDebugMode(bool value);
-  void runLastestCommandInTerminal();
+  void runLatestCommandInTerminal();
+  void runLatestCommandWithOctopiHelper();
+  void updatePacmanWithOctopiHelper();
   void removeTemporaryFile();
 
   static bool isDatabaseLocked();
   static void removeDatabaseLock();
+
+  void cancelProcess();
 
   //MIRROR-CHECK
   void doMirrorCheck();
@@ -93,7 +108,9 @@ signals:
   void readOutputError();
   void finished(int exitCode, QProcess::ExitStatus);
   void textToPrintExt(QString m_textToPrint);
+  void canStopTransaction(bool yesNo);
 
+  void commandToExecInQTermWidget(QString);
 };
 
 #endif // PACMANEXEC_H

@@ -30,8 +30,13 @@
 #include "transactiondialog.h"
 #include "multiselectiondialog.h"
 #include "searchlineedit.h"
+#include "globals.h"
 #include <iostream>
 #include <cassert>
+
+#ifdef QTERMWIDGET
+  #include "termwidget.h"
+#endif
 
 #include <QComboBox>
 #include <QProgressBar>
@@ -430,8 +435,8 @@ void MainWindow::insertIntoInstallPackageOptDeps(const QString &packageName)
     QString candidate = optDep;
     int points = candidate.indexOf(":");
     candidate = candidate.mid(0, points).trimmed();
-
     const PackageRepository::PackageData*const package = m_packageRepo.getFirstPackageByName(candidate);
+
     if(!isPackageInInstallTransaction(candidate) &&
        !isPackageInstalled(candidate) && package != 0)
     {
@@ -459,6 +464,7 @@ void MainWindow::insertIntoInstallPackageOptDeps(const QString &packageName)
     if (msd->exec() == QMessageBox::Ok)
     {
       selectedPackages = msd->getSelectedPackages();
+
       foreach(QString pkg, selectedPackages)
       {
         insertInstallPackageIntoTransaction(pkg);
@@ -671,6 +677,23 @@ void MainWindow::onPressDelete()
 }
 
 /*
+ * Checks if Internet connection is up/down
+ */
+bool MainWindow::isInternetAvailable()
+{
+  bool res=true;
+
+  //Test if Internet access exists
+  if (!UnixCommand::hasInternetConnection())
+  {
+    QMessageBox::critical(this, StrConstants::getError(), StrConstants::getInternetUnavailableError());
+    res=false;
+  }
+
+  return res;
+}
+
+/*
  * Checks if some SU utility is available...
  * Returns false if not!
  */
@@ -696,8 +719,7 @@ bool MainWindow::isSUAvailable()
  */
 void MainWindow::doMirrorCheck()
 {
-  if (m_commandExecuting != ectn_NONE ||
-      !UnixCommand::hasInternetConnection()) return;
+  if (m_commandExecuting != ectn_NONE) return;
 
   m_commandExecuting = ectn_MIRROR_CHECK;
   disableTransactionActions();
@@ -707,8 +729,7 @@ void MainWindow::doMirrorCheck()
   clearTabOutput();
 
   m_pacmanExec = new PacmanExec();
-  if (m_debugInfo)
-    m_pacmanExec->setDebugMode(true);
+  if (m_debugInfo) m_pacmanExec->setDebugMode(true);
 
   QObject::connect(m_pacmanExec, SIGNAL( finished ( int, QProcess::ExitStatus )),
                    this, SLOT( pacmanProcessFinished(int, QProcess::ExitStatus) ));
@@ -724,10 +745,12 @@ void MainWindow::doMirrorCheck()
  */
 void MainWindow::doSyncDatabase()
 {
-  if (!doRemovePacmanLockFile()) return;
+  if (!isSUAvailable()) return;
+
+  if (!isInternetAvailable()) return;
 
   //Let's synchronize kcp database too...
-  if (UnixCommand::getLinuxDistro() == ectn_KAOS && UnixCommand::hasTheExecutable("kcp") && !UnixCommand::isRootRunning())
+  if (UnixCommand::getLinuxDistro() == ectn_KAOS && UnixCommand::hasTheExecutable(ctn_KCP_TOOL) && !UnixCommand::isRootRunning())
     UnixCommand::execCommandAsNormalUser("kcp -u");
 
   m_commandExecuting = ectn_SYNC_DATABASE;
@@ -738,14 +761,14 @@ void MainWindow::doSyncDatabase()
   clearTabOutput();
 
   m_pacmanExec = new PacmanExec();
-  if (m_debugInfo)
-    m_pacmanExec->setDebugMode(true);
+  if (m_debugInfo) m_pacmanExec->setDebugMode(true);
 
   QObject::connect(m_pacmanExec, SIGNAL( finished ( int, QProcess::ExitStatus )),
                    this, SLOT( pacmanProcessFinished(int, QProcess::ExitStatus) ));
 
   QObject::connect(m_pacmanExec, SIGNAL(percentage(int)), this, SLOT(incrementPercentage(int)));
   QObject::connect(m_pacmanExec, SIGNAL(textToPrintExt(QString)), this, SLOT(outputText(QString)));
+  QObject::connect(m_pacmanExec, SIGNAL(canStopTransaction(bool)), this, SLOT(onCanStopTransaction(bool)));
 
   m_pacmanExec->doSyncDatabase();
 }
@@ -773,8 +796,7 @@ void MainWindow::doAURUpgrade()
   clearTabOutput();
 
   m_pacmanExec = new PacmanExec();
-  if (m_debugInfo)
-    m_pacmanExec->setDebugMode(true);
+  if (m_debugInfo) m_pacmanExec->setDebugMode(true);
 
   QObject::connect(m_pacmanExec, SIGNAL( finished ( int, QProcess::ExitStatus )),
                    this, SLOT( pacmanProcessFinished(int, QProcess::ExitStatus) ));
@@ -782,16 +804,22 @@ void MainWindow::doAURUpgrade()
   QObject::connect(m_pacmanExec, SIGNAL(percentage(int)), this, SLOT(incrementPercentage(int)));
   QObject::connect(m_pacmanExec, SIGNAL(textToPrintExt(QString)), this, SLOT(outputText(QString)));
 
+#ifdef QTERMWIDGET
+    QObject::connect(m_pacmanExec, SIGNAL(commandToExecInQTermWidget(QString)), this, SLOT(onExecCommandInTabTerminal(QString)));
+#endif
+
+  m_commandExecuting = ectn_RUN_IN_TERMINAL;
   m_pacmanExec->doAURUpgrade(listOfTargets);
 }
 
 /*
  * doSystemUpgrade shared code ...
  */
-void MainWindow::prepareSystemUpgrade()
+bool MainWindow::prepareSystemUpgrade()
 {
   m_systemUpgradeDialog = false;
-  if (!doRemovePacmanLockFile()) return;
+  bool res = isSUAvailable();
+  if (!res) return false;
 
   disableTransactionActions();
   m_progressWidget->setValue(0);
@@ -799,16 +827,21 @@ void MainWindow::prepareSystemUpgrade()
   clearTabOutput();
 
   m_pacmanExec = new PacmanExec();
-  if (m_debugInfo)
-    m_pacmanExec->setDebugMode(true);
+  if (m_debugInfo) m_pacmanExec->setDebugMode(true);
 
   QObject::connect(m_pacmanExec, SIGNAL( finished ( int, QProcess::ExitStatus )),
                    this, SLOT( pacmanProcessFinished(int, QProcess::ExitStatus) ));
 
   QObject::connect(m_pacmanExec, SIGNAL(percentage(int)), this, SLOT(incrementPercentage(int)));
   QObject::connect(m_pacmanExec, SIGNAL(textToPrintExt(QString)), this, SLOT(outputText(QString)));
+  QObject::connect(m_pacmanExec, SIGNAL(canStopTransaction(bool)), this, SLOT(onCanStopTransaction(bool)));
+
+#ifdef QTERMWIDGET
+    QObject::connect(m_pacmanExec, SIGNAL(commandToExecInQTermWidget(QString)), this, SLOT(onExecCommandInTabTerminal(QString)));
+#endif
 
   disableTransactionActions();
+  return true;
 }
 
 /*
@@ -831,7 +864,10 @@ void MainWindow::doSystemUpgrade(SystemUpgradeOptions systemUpgradeOptions)
 
   if (!isSUAvailable()) return;
 
+  if(!isInternetAvailable()) return;
+
   qApp->processEvents();
+  int res;
 
   if(systemUpgradeOptions == ectn_SYNC_DATABASE_OPT)
   {
@@ -841,7 +877,7 @@ void MainWindow::doSystemUpgrade(SystemUpgradeOptions systemUpgradeOptions)
   else
   {
     //Shows a dialog indicating the targets needed to be retrieved and asks for the user's permission.
-    QList<PackageListData> * targets = Package::getTargetUpgradeList();
+    QList<PackageListData> * targets = Package::getTargetUpgradeList();;
 
     //There are no new updates to install!
     if (targets->count() == 0 && m_outdatedStringList->count() == 0)
@@ -866,7 +902,13 @@ void MainWindow::doSystemUpgrade(SystemUpgradeOptions systemUpgradeOptions)
 
         if (res == QMessageBox::Yes)
         {
-          prepareSystemUpgrade();
+          res = prepareSystemUpgrade();
+          if (!res)
+          {
+            m_systemUpgradeDialog = false;
+            enableTransactionActions();
+            return;
+          }
 
           m_commandExecuting = ectn_RUN_SYSTEM_UPGRADE_IN_TERMINAL;
           m_pacmanExec->doSystemUpgradeInTerminal(ectn_SYNC_DATABASE);
@@ -887,57 +929,52 @@ void MainWindow::doSystemUpgrade(SystemUpgradeOptions systemUpgradeOptions)
     }
     list.remove(list.size()-1, 1);
 
-    //User already confirmed all updates in the notifier window!
-    if (systemUpgradeOptions == ectn_NOCONFIRM_OPT)
-    {
-      prepareSystemUpgrade();
-      m_commandExecuting = ectn_SYSTEM_UPGRADE;
-      m_pacmanExec->doSystemUpgrade();
-      m_commandQueued = ectn_NONE;
-    }
+    //Let's build the system upgrade transaction dialog...
+    QString ds = Package::kbytesToSize(totalDownloadSize);
+
+    TransactionDialog question(this);
+
+    if(targets->count()==1)
+      question.setText(StrConstants::getRetrievePackage() +
+                       "\n\n" + StrConstants::getTotalDownloadSize().arg(ds).remove(" KB"));
     else
+      question.setText(StrConstants::getRetrievePackages(targets->count()) +
+                       "\n\n" + StrConstants::getTotalDownloadSize().arg(ds).remove(" KB"));
+
+    question.setWindowTitle(StrConstants::getConfirmation());
+    question.setInformativeText(StrConstants::getConfirmationQuestion());
+    question.setDetailedText(list);
+
+    m_systemUpgradeDialog = true;
+    int result = question.exec();
+
+    if(result == QDialogButtonBox::Yes || result == QDialogButtonBox::AcceptRole)
     {
-      //Let's build the system upgrade transaction dialog...
-      QString ds = Package::kbytesToSize(totalDownloadSize);
-
-      TransactionDialog question(this);
-
-      if(targets->count()==1)
-        question.setText(StrConstants::getRetrievePackage() +
-                         "\n\n" + StrConstants::getTotalDownloadSize().arg(ds).remove(" KB"));
-      else
-        question.setText(StrConstants::getRetrievePackages(targets->count()) +
-                         "\n\n" + StrConstants::getTotalDownloadSize().arg(ds).remove(" KB"));
-
-      question.setWindowTitle(StrConstants::getConfirmation());
-      question.setInformativeText(StrConstants::getConfirmationQuestion());
-      question.setDetailedText(list);
-
-      m_systemUpgradeDialog = true;
-      int result = question.exec();
-
-      if(result == QDialogButtonBox::Yes || result == QDialogButtonBox::AcceptRole)
-      {
-        prepareSystemUpgrade();
-
-        if (result == QDialogButtonBox::Yes)
-        {
-          m_commandExecuting = ectn_SYSTEM_UPGRADE;
-          m_pacmanExec->doSystemUpgrade();
-          m_commandQueued = ectn_NONE;
-        }
-        else if (result == QDialogButtonBox::AcceptRole)
-        {
-          m_commandExecuting = ectn_RUN_SYSTEM_UPGRADE_IN_TERMINAL;
-          m_pacmanExec->doSystemUpgradeInTerminal();
-          m_commandQueued = ectn_NONE;
-        }
-      }
-      else if (result == QDialogButtonBox::No)
+      res = prepareSystemUpgrade();
+      if (!res)
       {
         m_systemUpgradeDialog = false;
         enableTransactionActions();
+        return;
       }
+
+      if (result == QDialogButtonBox::Yes)
+      {
+        m_commandExecuting = ectn_SYSTEM_UPGRADE;
+        m_pacmanExec->doSystemUpgrade();
+        m_commandQueued = ectn_NONE;
+      }
+      else if (result == QDialogButtonBox::AcceptRole)
+      {
+        m_commandExecuting = ectn_RUN_SYSTEM_UPGRADE_IN_TERMINAL;
+        m_pacmanExec->doSystemUpgradeInTerminal();
+        m_commandQueued = ectn_NONE;
+      }
+    }
+    else if (result == QDialogButtonBox::No)
+    {
+      m_systemUpgradeDialog = false;
+      enableTransactionActions();
     }
   }
 }
@@ -980,7 +1017,6 @@ void MainWindow::doRemoveAndInstall()
 
   if (hasPartialUpgrade(pkgsToInstall)) return;
 
-  //totalDownloadSize = totalDownloadSize / 1024;
   QString ds = Package::kbytesToSize(totalDownloadSize);
 
   if (installList.count() == 0)
@@ -1038,7 +1074,7 @@ void MainWindow::doRemoveAndInstall()
 
   if(result == QDialogButtonBox::Yes || result == QDialogButtonBox::AcceptRole)
   {
-    if (!doRemovePacmanLockFile()) return;
+    if (!isSUAvailable()) return;
 
     disableTransactionActions();
     m_progressWidget->setValue(0);
@@ -1046,14 +1082,18 @@ void MainWindow::doRemoveAndInstall()
     clearTabOutput();
 
     m_pacmanExec = new PacmanExec();
-    if (m_debugInfo)
-      m_pacmanExec->setDebugMode(true);
+    if (m_debugInfo) m_pacmanExec->setDebugMode(true);
 
     QObject::connect(m_pacmanExec, SIGNAL( finished ( int, QProcess::ExitStatus )),
                      this, SLOT( pacmanProcessFinished(int, QProcess::ExitStatus) ));
 
     QObject::connect(m_pacmanExec, SIGNAL(percentage(int)), this, SLOT(incrementPercentage(int)));
     QObject::connect(m_pacmanExec, SIGNAL(textToPrintExt(QString)), this, SLOT(outputText(QString)));
+    QObject::connect(m_pacmanExec, SIGNAL(canStopTransaction(bool)), this, SLOT(onCanStopTransaction(bool)));
+
+#ifdef QTERMWIDGET
+    QObject::connect(m_pacmanExec, SIGNAL(commandToExecInQTermWidget(QString)), this, SLOT(onExecCommandInTabTerminal(QString)));
+#endif
 
     if (result == QDialogButtonBox::Yes)
     {
@@ -1110,7 +1150,7 @@ void MainWindow::doRemove()
 
   if(result == QDialogButtonBox::Yes || result == QDialogButtonBox::AcceptRole)
   {
-    if (!doRemovePacmanLockFile()) return;
+    if (!isSUAvailable()) return;
 
     disableTransactionActions();
     m_progressWidget->setValue(0);
@@ -1118,14 +1158,18 @@ void MainWindow::doRemove()
     clearTabOutput();
 
     m_pacmanExec = new PacmanExec();
-    if (m_debugInfo)
-      m_pacmanExec->setDebugMode(true);
+    if (m_debugInfo) m_pacmanExec->setDebugMode(true);
 
     QObject::connect(m_pacmanExec, SIGNAL( finished ( int, QProcess::ExitStatus )),
                      this, SLOT( pacmanProcessFinished(int, QProcess::ExitStatus) ));
 
     QObject::connect(m_pacmanExec, SIGNAL(percentage(int)), this, SLOT(incrementPercentage(int)));
     QObject::connect(m_pacmanExec, SIGNAL(textToPrintExt(QString)), this, SLOT(outputText(QString)));
+    QObject::connect(m_pacmanExec, SIGNAL(canStopTransaction(bool)), this, SLOT(onCanStopTransaction(bool)));
+
+#ifdef QTERMWIDGET
+    QObject::connect(m_pacmanExec, SIGNAL(commandToExecInQTermWidget(QString)), this, SLOT(onExecCommandInTabTerminal(QString)));
+#endif
 
     if (result == QDialogButtonBox::Yes)
     {
@@ -1198,8 +1242,8 @@ void MainWindow::doInstallAURPackage()
       return;
     }
 
-    if (Package::getForeignRepositoryToolName() != "pacaur" &&
-        Package::getForeignRepositoryToolName() != "kcp")
+    if (Package::getForeignRepositoryToolName() != ctn_PACAUR_TOOL &&
+        Package::getForeignRepositoryToolName() != ctn_KCP_TOOL)
       listOfTargets += StrConstants::getForeignRepositoryTargetPrefix() + package->name + " ";
     else
       listOfTargets += package->name + " ";
@@ -1217,8 +1261,7 @@ void MainWindow::doInstallAURPackage()
   clearTabOutput();
 
   m_pacmanExec = new PacmanExec();
-  if (m_debugInfo)
-    m_pacmanExec->setDebugMode(true);
+  if (m_debugInfo) m_pacmanExec->setDebugMode(true);
 
   QObject::connect(m_pacmanExec, SIGNAL( finished ( int, QProcess::ExitStatus )),
                    this, SLOT( pacmanProcessFinished(int, QProcess::ExitStatus) ));
@@ -1226,6 +1269,11 @@ void MainWindow::doInstallAURPackage()
   QObject::connect(m_pacmanExec, SIGNAL(percentage(int)), this, SLOT(incrementPercentage(int)));
   QObject::connect(m_pacmanExec, SIGNAL(textToPrintExt(QString)), this, SLOT(outputText(QString)));
 
+#ifdef QTERMWIDGET
+    QObject::connect(m_pacmanExec, SIGNAL(commandToExecInQTermWidget(QString)), this, SLOT(onExecCommandInTabTerminal(QString)));
+#endif
+
+  m_commandExecuting = ectn_RUN_IN_TERMINAL;
   m_pacmanExec->doAURInstall(listOfTargets);
 }
 
@@ -1256,8 +1304,7 @@ void MainWindow::doRemoveAURPackage()
   clearTabOutput();
 
   m_pacmanExec = new PacmanExec();
-  if (m_debugInfo)
-    m_pacmanExec->setDebugMode(true);
+  if (m_debugInfo) m_pacmanExec->setDebugMode(true);
 
   QObject::connect(m_pacmanExec, SIGNAL( finished ( int, QProcess::ExitStatus )),
                    this, SLOT( pacmanProcessFinished(int, QProcess::ExitStatus) ));
@@ -1265,7 +1312,43 @@ void MainWindow::doRemoveAURPackage()
   QObject::connect(m_pacmanExec, SIGNAL(percentage(int)), this, SLOT(incrementPercentage(int)));
   QObject::connect(m_pacmanExec, SIGNAL(textToPrintExt(QString)), this, SLOT(outputText(QString)));
 
+#ifdef QTERMWIDGET
+    QObject::connect(m_pacmanExec, SIGNAL(commandToExecInQTermWidget(QString)), this, SLOT(onExecCommandInTabTerminal(QString)));
+#endif
+
+  m_commandExecuting = ectn_RUN_IN_TERMINAL;
   m_pacmanExec->doAURRemove(listOfTargets);
+}
+
+/*
+ * Whenever user chooses another AUR tool in OptionsDialog
+ */
+void MainWindow::onAURToolChanged()
+{
+  if (SettingsManager::getAURToolName() == ctn_NO_AUR_TOOL)
+  {
+    m_hasAURTool = false;
+    m_actionSwitchToAURTool->setVisible(false);
+    m_refreshForeignPackageList = false;
+    m_outdatedAURPackagesNameVersion->clear();
+    m_outdatedAURStringList->clear();
+  }
+  else //We are using pacaur/yaourt tool
+  {
+    m_hasAURTool = true;
+
+    if (!isAURGroupSelected())
+    {
+      m_actionSwitchToAURTool->setVisible(true);
+      m_actionSwitchToAURTool->setEnabled(false);
+    }
+
+    m_actionSwitchToAURTool->setText(StrConstants::getUseAURTool());
+    m_actionSwitchToAURTool->setToolTip(m_actionSwitchToAURTool->text() + "  (Ctrl+Shift+Y)");
+    m_refreshForeignPackageList = true;
+  }
+
+  metaBuildPackageList();
 }
 
 /*
@@ -1342,7 +1425,6 @@ void MainWindow::doInstall()
 
   if (hasPartialUpgrade(pkgsToInstall)) return;
 
-  //totalDownloadSize = totalDownloadSize / 1024;
   QString ds = Package::kbytesToSize(totalDownloadSize);
 
   if (list.count() == 0)
@@ -1375,7 +1457,7 @@ void MainWindow::doInstall()
 
   if(result == QDialogButtonBox::Yes || result == QDialogButtonBox::AcceptRole)
   {
-    if (!doRemovePacmanLockFile()) return;
+    if (!isSUAvailable()) return;
 
     disableTransactionActions();
     m_progressWidget->setValue(0);
@@ -1383,14 +1465,18 @@ void MainWindow::doInstall()
     clearTabOutput();
 
     m_pacmanExec = new PacmanExec();
-    if (m_debugInfo)
-      m_pacmanExec->setDebugMode(true);
+    if (m_debugInfo) m_pacmanExec->setDebugMode(true);
 
     QObject::connect(m_pacmanExec, SIGNAL( finished ( int, QProcess::ExitStatus )),
                      this, SLOT( pacmanProcessFinished(int, QProcess::ExitStatus) ));
 
     QObject::connect(m_pacmanExec, SIGNAL(percentage(int)), this, SLOT(incrementPercentage(int)));
     QObject::connect(m_pacmanExec, SIGNAL(textToPrintExt(QString)), this, SLOT(outputText(QString)));
+    QObject::connect(m_pacmanExec, SIGNAL(canStopTransaction(bool)), this, SLOT(onCanStopTransaction(bool)));
+
+#ifdef QTERMWIDGET
+    QObject::connect(m_pacmanExec, SIGNAL(commandToExecInQTermWidget(QString)), this, SLOT(onExecCommandInTabTerminal(QString)));
+#endif
 
     if (result == QDialogButtonBox::Yes)
     {
@@ -1444,10 +1530,10 @@ void MainWindow::doInstallLocalPackages()
     question.setText(StrConstants::getRetrievePackages(m_packagesToInstallList.count()));
 
   int result = question.exec();
-
+  qApp->processEvents();
   if(result == QDialogButtonBox::Yes || result == QDialogButtonBox::AcceptRole)
   {
-    if (!doRemovePacmanLockFile()) return;
+    if (!isSUAvailable()) return;
 
     disableTransactionActions();
     m_progressWidget->setValue(0);
@@ -1455,14 +1541,18 @@ void MainWindow::doInstallLocalPackages()
     clearTabOutput();
 
     m_pacmanExec = new PacmanExec();
-    if (m_debugInfo)
-      m_pacmanExec->setDebugMode(true);
+    if (m_debugInfo) m_pacmanExec->setDebugMode(true);
 
     QObject::connect(m_pacmanExec, SIGNAL( finished ( int, QProcess::ExitStatus )),
                      this, SLOT( pacmanProcessFinished(int, QProcess::ExitStatus) ));
 
     QObject::connect(m_pacmanExec, SIGNAL(percentage(int)), this, SLOT(incrementPercentage(int)));
     QObject::connect(m_pacmanExec, SIGNAL(textToPrintExt(QString)), this, SLOT(outputText(QString)));
+    QObject::connect(m_pacmanExec, SIGNAL(canStopTransaction(bool)), this, SLOT(onCanStopTransaction(bool)));
+
+#ifdef QTERMWIDGET
+    QObject::connect(m_pacmanExec, SIGNAL(commandToExecInQTermWidget(QString)), this, SLOT(onExecCommandInTabTerminal(QString)));
+#endif
 
     if (result == QDialogButtonBox::Yes)
     {
@@ -1474,36 +1564,6 @@ void MainWindow::doInstallLocalPackages()
       m_commandExecuting = ectn_RUN_IN_TERMINAL;
       m_pacmanExec->doInstallLocalInTerminal(listOfTargets);
     }
-  }
-}
-
-/*
- * Clears the local package cache using "pacman -Sc"
- */
-void MainWindow::doCleanCache()
-{
-  if (!doRemovePacmanLockFile()) return;
-
-  int res = QMessageBox::question(this, StrConstants::getConfirmation(),
-                                  StrConstants::getCleanCacheConfirmation(),
-                                  QMessageBox::Yes|QMessageBox::No, QMessageBox::No);
-
-  if (res == QMessageBox::Yes)
-  {
-    qApp->processEvents();
-
-    clearTabOutput();
-    writeToTabOutput("<b>" + StrConstants::getCleaningPackageCache() + "</b><br>");
-    qApp->processEvents();
-    bool res = UnixCommand::cleanPacmanCache();
-    qApp->processEvents();
-
-    if (res)
-    {
-      writeToTabOutput("<b>" + StrConstants::getCommandFinishedOK() + "</b>");
-    }
-    else
-      writeToTabOutput("<b>" + StrConstants::getCommandFinishedWithErrors() + "</b>");
   }
 }
 
@@ -1548,16 +1608,16 @@ void MainWindow::toggleTransactionActions(const bool value)
     ui->actionCancel->setEnabled(false);
 
     if(m_hasMirrorCheck) m_actionMenuMirrorCheck->setEnabled(true);
-    if(m_hasAURTool) m_actionSwitchToAURTool->setEnabled(true);
+    if(m_hasAURTool && m_commandExecuting == ectn_NONE && m_initializationCompleted) m_actionSwitchToAURTool->setEnabled(true);
 
     ui->actionSyncPackages->setEnabled(true);
     if (value == true && m_outdatedStringList->count() > 0)
       ui->actionSystemUpgrade->setEnabled(true);
   }
-  else if (value == false) //&& state == false)
+  else if (value == false)
   {
-    ui->actionCommit->setEnabled(false); //CHANGED
-    ui->actionCancel->setEnabled(false); //CHANGED
+    ui->actionCommit->setEnabled(false);
+    ui->actionCancel->setEnabled(false);
 
     if(m_hasMirrorCheck) m_actionMenuMirrorCheck->setEnabled(false);
     if(m_hasAURTool) m_actionSwitchToAURTool->setEnabled(false);
@@ -1581,7 +1641,8 @@ void MainWindow::toggleTransactionActions(const bool value)
   ui->actionRepositoryEditor->setEnabled(value);
   m_actionSysInfo->setEnabled(value);
 
-  m_actionSwitchToAURTool->setEnabled(value);
+  if (value == true && m_initializationCompleted) m_actionSwitchToAURTool->setEnabled(value);
+
   ui->actionGetNews->setEnabled(value);  
   ui->actionInstallLocalPackage->setEnabled(value);
   ui->actionOpenRootTerminal->setEnabled(value);
@@ -1603,16 +1664,16 @@ void MainWindow::toggleSystemActions(const bool value)
     m_actionMenuMirrorCheck->setEnabled(value);
   }
 
-  if (isAURGroupSelected() && Package::getForeignRepositoryToolName() == "kcp")
+  if (isAURGroupSelected() && Package::getForeignRepositoryToolName() == ctn_KCP_TOOL)
   {
     ui->actionSyncPackages->setEnabled(true);
   }
-  else
+  else if (Package::getForeignRepositoryToolName() != ctn_KCP_TOOL)
   {
     ui->actionSyncPackages->setEnabled(value);
   }
-
-  m_actionMenuOptions->setEnabled(value);
+  else if (!isAURGroupSelected())
+    m_actionMenuOptions->setEnabled(value);
 
   ui->actionInstallLocalPackage->setEnabled(value);
   ui->actionGetNews->setEnabled(value);
@@ -1628,6 +1689,8 @@ void MainWindow::toggleSystemActions(const bool value)
  */
 void MainWindow::commitTransaction()
 {
+  if (!isInternetAvailable()) return;
+
   //Are there any remove actions to be commited?
   if(getRemoveTransactionParentItem()->rowCount() > 0 && getInstallTransactionParentItem()->rowCount() > 0)
   {
@@ -1661,12 +1724,37 @@ void MainWindow::cancelTransaction()
 }
 
 /*
+ * Kills the running pacman command
+ */
+void MainWindow::stopTransaction()
+{
+  if (m_commandExecuting != ectn_NONE && m_pacmanExec != NULL)
+  {
+    m_pacmanExec->cancelProcess();
+  }
+}
+
+/*
+ * Called whenever Octopi's parser detects a potential for enabling/disabling stop transaction button
+ */
+void MainWindow::onCanStopTransaction(bool yesNo)
+{
+  if (yesNo == true && m_progressWidget->isHidden()) return;
+  if (SettingsManager::getShowStopTransaction()) m_toolButtonStopTransaction->setVisible(yesNo);
+}
+
+/*
  * This SLOT is called when Pacman's process has finished execution [PacmanExec based!!!]
  */
 void MainWindow::pacmanProcessFinished(int exitCode, QProcess::ExitStatus exitStatus)
 {
   bool bRefreshGroups = true;
   m_progressWidget->close();
+
+  m_progressWidget->setValue(0);
+  m_progressWidget->show();
+
+  if (SettingsManager::getShowStopTransaction()) m_toolButtonStopTransaction->setVisible(false);
   ui->twProperties->setTabText(ctn_TABINDEX_OUTPUT, StrConstants::getTabOutputName());
 
   //mate-terminal is returning code 255 sometimes...
@@ -1675,7 +1763,6 @@ void MainWindow::pacmanProcessFinished(int exitCode, QProcess::ExitStatus exitSt
     //First, we empty the tabs cache!
     m_cachedPackageInInfo = "";
     m_cachedPackageInFiles = "";
-
     writeToTabOutput("<br><b>" + StrConstants::getCommandFinishedOK() + "</b><br>");
   }
   else
@@ -1722,15 +1809,18 @@ void MainWindow::pacmanProcessFinished(int exitCode, QProcess::ExitStatus exitSt
           {
             metaBuildPackageList();
           }
-          else if (Package::getForeignRepositoryToolName() == "kcp")
+          else if (Package::getForeignRepositoryToolName() == ctn_KCP_TOOL)
           {
             metaBuildPackageList();
             delete m_pacmanExec;
             m_commandExecuting = ectn_NONE;
             enableTransactionActions();
+            m_progressWidget->close();
             return;
           }
-        }
+        }        
+        if (m_outdatedStringList->count() > 0)
+          execCommandInAnotherThread(ctn_PACMAN_SUP_COMMAND);
       }
       else if (m_commandExecuting == ectn_SYSTEM_UPGRADE ||
                m_commandExecuting == ectn_RUN_SYSTEM_UPGRADE_IN_TERMINAL)
@@ -1760,6 +1850,7 @@ void MainWindow::pacmanProcessFinished(int exitCode, QProcess::ExitStatus exitSt
       {
         m_commandExecuting = ectn_NONE;
         doSystemUpgrade();
+        m_progressWidget->close();
         return;
       }
     }
@@ -1773,7 +1864,8 @@ void MainWindow::pacmanProcessFinished(int exitCode, QProcess::ExitStatus exitSt
 
     if (res == QMessageBox::Yes)
     {
-      m_pacmanExec->runLastestCommandInTerminal();
+      m_pacmanExec->runLatestCommandInTerminal();
+      m_progressWidget->close();
       return;
     }
   }
@@ -1790,12 +1882,84 @@ void MainWindow::pacmanProcessFinished(int exitCode, QProcess::ExitStatus exitSt
   refreshMenuTools(); //Maybe some of octopi tools were added/removed...
 
   delete m_pacmanExec;
-
+  if (m_progressWidget->isVisible()) m_progressWidget->close();
   m_commandExecuting = ectn_NONE;
 
-  //if (isPackageTreeViewVisible() && !ui->tvPackages->hasFocus()) ui->tvPackages->setFocus();
   if (isPackageTreeViewVisible() && !m_leFilterPackage->hasFocus()) m_leFilterPackage->setFocus();
 }
+
+#ifdef QTERMWIDGET  //BEGIN OF QTERMWIDGET CODE
+
+/*
+ * THIS IS THE COUNTERPART OF "pacmanProcessFinished" FOR QTERMWIDGET AUR COMMANDS
+ * Whenever the terminal transaction has finished, we can update the UI
+ */
+void MainWindow::onPressAnyKeyToContinue()
+{
+  if (m_commandExecuting == ectn_NONE) return;
+
+  //For the situations where a Sysupgrade has "pacman" pkg
+  /*if (m_commandExecuting == ectn_RUN_SYSTEM_UPGRADE_IN_TERMINAL
+      && m_outdatedStringList->count() > 0)
+  {
+    metaBuildPackageList();
+    m_console->enter();
+    m_console->setFocus();
+    m_commandExecuting = ectn_NONE;
+    m_progressWidget->close();
+    doSystemUpgrade();
+    return;
+  }*/
+
+  m_progressWidget->setValue(0);
+  m_progressWidget->show();
+
+  bool bRefreshGroups = true;
+  clearTransactionTreeView();
+  metaBuildPackageList();
+
+  if (isAURGroupSelected())
+  {
+    toggleSystemActions(false);
+    bRefreshGroups = false;
+  }
+
+  if (m_commandExecuting != ectn_MIRROR_CHECK && bRefreshGroups)
+    refreshGroupsWidget();
+
+  refreshMenuTools(); //Maybe some of octopi tools were added/removed...
+
+  enableTransactionActions();
+
+  if (m_pacmanExec == nullptr)
+    delete m_pacmanExec;
+
+  m_commandExecuting = ectn_NONE;
+  UnixCommand::removeTemporaryFiles();
+  m_console->execute("");
+  m_console->setFocus();
+}
+
+/*
+ * Whenever a user strikes Ctrl+C, Ctrl+D or Ctrl+Z in the terminal
+ */
+void MainWindow::onCancelControlKey()
+{
+  if (m_commandExecuting != ectn_NONE)
+  {
+    clearTransactionTreeView();
+    enableTransactionActions();
+
+    if (m_pacmanExec == nullptr)
+      delete m_pacmanExec;
+
+    m_pacmanExec = nullptr;
+    m_commandExecuting = ectn_NONE;
+    UnixCommand::removeTemporaryFiles();
+  }
+}
+
+#endif  //END OF QTERMWIDGET CODE
 
 /*
  * A helper method which writes the given string to OutputTab's textbrowser
@@ -1815,7 +1979,11 @@ void MainWindow::writeToTabOutput(const QString &msg, TreatURLLinks treatURLLink
  */
 void MainWindow::incrementPercentage(int percentage)
 {
-  if (!m_progressWidget->isVisible()) m_progressWidget->show();
+  if (!m_progressWidget->isVisible())
+  {
+    m_progressWidget->show();
+    if (SettingsManager::getShowStopTransaction()) m_toolButtonStopTransaction->setVisible(true);
+  }
   m_progressWidget->setValue(percentage);
 }
 

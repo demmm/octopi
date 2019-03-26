@@ -131,6 +131,7 @@ public:
   static QIcon getIconUnrequired(){ return QIcon(":/resources/images/unrequired.png"); }
   static QIcon getIconForeignGreen(){ return QIcon(":/resources/images/foreign_green.png"); }
   static QIcon getIconForeignRed(){ return QIcon(":/resources/images/foreign_red.png"); }
+  static QIcon getIconStop(){ return QIcon(":/resources/images/stop_small_red.png"); }
 
   static QIcon getIconBinary(){
     if (WMHelper::isKDERunning() && (UnixCommand::getLinuxDistro() != ectn_KAOS))
@@ -250,7 +251,7 @@ public:
       return QIcon::fromTheme("document-open-folder", QIcon(":/resources/images/folder.png"));
     else
     {
-      if (WMHelper::isKDERunning() || WMHelper::isRazorQtRunning() || WMHelper::isLXQTRunning())
+      if (WMHelper::isKDERunning() /*|| WMHelper::isRazorQtRunning()*/ || WMHelper::isLXQTRunning())
       {
         return QIcon(":/resources/images/folder.png");
       }

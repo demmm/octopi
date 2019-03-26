@@ -24,11 +24,17 @@
 #include "../../src/uihelper.h"
 #include "../../src/strconstants.h"
 
+#ifdef QTERMWIDGET
+  #include "../../src/termwidget.h"
+#endif
+
 #include <QTextBrowser>
 #include <QVBoxLayout>
 #include <QProgressBar>
 #include <QCloseEvent>
 #include <QMessageBox>
+#include <QAction>
+#include <QToolButton>
 
 /*
  * Class that displays pacman output for system upgrade
@@ -39,7 +45,6 @@
  */
 OutputDialog::OutputDialog(QWidget *parent): QDialog(parent)
 {
-  init();
   m_upgradeRunning = false;
   m_debugInfo = false;
 }
@@ -52,30 +57,52 @@ void OutputDialog::setDebugMode(bool newValue)
   m_debugInfo = newValue;
 }
 
-QFrame::Shape OutputDialog::frameShape()
+/*
+ * Sets the list of AUR packages that need to be upgraded
+ */
+void OutputDialog::setListOfAURPackagesToUpgrade(const QString &list)
 {
-    return m_textBrowser->frameShape();
-}
-
-void OutputDialog::setFrameShape(QFrame::Shape shape)
-{
-    m_textBrowser->setFrameShape(shape);
+  m_listOfAURPackagesToUpgrade = list;
 }
 
 /*
- * Let's build the main widgets...
+ * Controls if this dialog was called for Pacman or AUR upgrade
  */
-void OutputDialog::init()
+void OutputDialog::setViewAsTextBrowser(bool value)
+{
+  m_viewAsTextBrowser = value;
+}
+
+/*
+ * Let's build the main widgets for Pacman System Upgrade...
+ */
+void OutputDialog::initAsTextBrowser()
 {
   this->resize(650, 500);
 
   setWindowTitle(QCoreApplication::translate("MainWindow", "System upgrade"));
   setWindowIcon(IconHelper::getIconSystemUpgrade());
+
+  m_actionStopTransaction = new QAction(this);
+  m_actionStopTransaction->setIcon(IconHelper::getIconStop());
+  m_actionStopTransaction->setText(StrConstants::getStop());
+  connect(m_actionStopTransaction, SIGNAL(triggered()), this, SLOT(stopTransaction()));
+
+  m_toolButtonStopTransaction = new QToolButton(this);
+  m_toolButtonStopTransaction->setDefaultAction(m_actionStopTransaction);
+  m_toolButtonStopTransaction->setVisible(false);
+  m_toolButtonStopTransaction->setAutoRaise(true);
+
   m_mainLayout = new QVBoxLayout(this);
+  m_horizLayout = new QHBoxLayout();
   m_textBrowser = new QTextBrowser(this);
   m_progressBar = new QProgressBar(this);
 
+  m_horizLayout->addWidget(m_progressBar);
+  m_horizLayout->addSpacing(2);
+  m_horizLayout->addWidget(m_toolButtonStopTransaction);
   m_textBrowser->setGeometry(QRect(0, 0, 650, 500));
+  m_textBrowser->setFrameShape(QFrame::NoFrame);
 
   m_mainLayout->addWidget(m_textBrowser);
 
@@ -84,7 +111,8 @@ void OutputDialog::init()
   connect(m_searchBar, SIGNAL(closed()), this, SLOT(onSearchBarClosed()));
   connect(m_searchBar, SIGNAL(findNext()), this, SLOT(onSearchBarFindNext()));
   connect(m_searchBar, SIGNAL(findPrevious()), this, SLOT(onSearchBarFindPrevious()));
-  m_mainLayout->addWidget(m_progressBar);
+
+  m_mainLayout->addLayout(m_horizLayout);
   m_mainLayout->addWidget(m_searchBar);
   m_mainLayout->setSpacing(0);
   m_mainLayout->setSizeConstraint(QLayout::SetMinimumSize);
@@ -94,8 +122,104 @@ void OutputDialog::init()
   m_progressBar->setMaximum(100);
   m_progressBar->setValue(0);
   m_progressBar->close();
-  m_searchBar->show();
+  //m_searchBar->show();
 }
+
+#ifdef QTERMWIDGET
+
+/*
+ * Let's build the main widgets for AUR Upgrade...
+ */
+void OutputDialog::initAsTermWidget()
+{
+  this->resize(650, 500);
+  setWindowTitle(QCoreApplication::translate("MainWindow", "System upgrade"));
+  setWindowIcon(IconHelper::getIconSystemUpgrade());
+
+  m_mainLayout = new QVBoxLayout(this);
+  m_console = new TermWidget(this);
+  //connect(m_console, SIGNAL(finished()), this, SLOT(initAsTermWidget()));
+  m_mainLayout->addWidget(m_console);
+  m_mainLayout->setSpacing(0);
+  m_mainLayout->setSizeConstraint(QLayout::SetMinimumSize);
+  m_mainLayout->setContentsMargins(2, 2, 2, 2);
+  m_console->setFocus();
+}
+
+/*
+ * When user wants to upgrade system using a terminal
+ */
+void OutputDialog::doSystemUpgradeInTerminal()
+{
+  m_pacmanExec = new PacmanExec();
+  QObject::connect(m_pacmanExec, SIGNAL(commandToExecInQTermWidget(QString)), this,
+                   SLOT(onExecCommandInTabTerminal(QString)));
+  m_upgradeRunning = true;
+  m_pacmanExec->doSystemUpgradeInTerminal();
+}
+
+/*
+ * When user wants to start an AUR upgrade transaction
+ */
+void OutputDialog::doAURUpgrade()
+{
+  m_pacmanExec = new PacmanExec();
+  QObject::connect(m_pacmanExec, SIGNAL(commandToExecInQTermWidget(QString)), this,
+                   SLOT(onExecCommandInTabTerminal(QString)));
+  m_upgradeRunning = true;
+  m_pacmanExec->doAURUpgrade(m_listOfAURPackagesToUpgrade);
+}
+
+/*
+ * When there is a command to exec in the terminal
+ */
+void OutputDialog::onExecCommandInTabTerminal(QString command)
+{
+  disconnect(m_console, SIGNAL(onPressAnyKeyToContinue()), this, SLOT(onPressAnyKeyToContinue()));
+  disconnect(m_console, SIGNAL(onCancelControlKey()), this, SLOT(onCancelControlKey()));
+  connect(m_console, SIGNAL(onPressAnyKeyToContinue()), this, SLOT(onPressAnyKeyToContinue()));
+  connect(m_console, SIGNAL(onCancelControlKey()), this, SLOT(onCancelControlKey()));
+
+  m_console->enter();
+  m_console->execute("clear");
+  m_console->execute(command);
+  m_console->setFocus();
+}
+
+/*
+ * Whenever the terminal transaction has finished, we can update the UI
+ */
+void OutputDialog::onPressAnyKeyToContinue()
+{
+  m_console->enter();
+  m_console->execute("clear");
+  m_console->setFocus();
+
+  if (!m_upgradeRunning) return;
+  if (m_pacmanExec == nullptr)
+    delete m_pacmanExec;
+
+  m_upgradeRunning = false;
+  reject();
+}
+
+/*
+ * Whenever a user strikes Ctrl+C, Ctrl+D or Ctrl+Z in the terminal
+ */
+void OutputDialog::onCancelControlKey()
+{
+  if (m_upgradeRunning)
+  {
+    if (m_pacmanExec == nullptr)
+      delete m_pacmanExec;
+
+    m_pacmanExec = nullptr;
+    m_upgradeRunning = false;
+    reject();
+  }
+}
+
+#endif
 
 /*
  * Calls PacmanExec to begin system upgrade
@@ -112,11 +236,10 @@ void OutputDialog::doSystemUpgrade()
 
   QObject::connect(m_pacmanExec, SIGNAL(percentage(int)), this, SLOT(onPencertange(int)));
   QObject::connect(m_pacmanExec, SIGNAL(textToPrintExt(QString)), this, SLOT(onWriteOutput(QString)));
+  QObject::connect(m_pacmanExec, SIGNAL(canStopTransaction(bool)), this, SLOT(onCanStopTransaction(bool)));
 
   m_upgradeRunning = true;
   m_pacmanExec->doSystemUpgrade();
-
-  //m_pacmanExec->doInstall("octopi");  //TEST CODE!
 }
 
 /*
@@ -124,11 +247,16 @@ void OutputDialog::doSystemUpgrade()
  */
 void OutputDialog::show()
 {
-#if QT_VERSION >= 0x050000
-  utils::positionWindowAtScreenCenter(this);
+  //If we are asking for a Pacman system upgrade...
+  if (m_viewAsTextBrowser) initAsTextBrowser();
+#ifdef QTERMWIDGET
+  else initAsTermWidget();
 #endif
+
+  //Let's restore the dialog size saved...
+  restoreGeometry(SettingsManager::getOutputDialogWindowSize());
+
   QDialog::show();
-  doSystemUpgrade();
 }
 
 /*
@@ -138,6 +266,9 @@ void OutputDialog::reject()
 {
   if (!m_upgradeRunning)
   {
+    //Let's save the dialog size value before closing it.
+    QByteArray windowSize=saveGeometry();
+    SettingsManager::setOutputDialogWindowSize(windowSize);
     QDialog::reject();
   }
 }
@@ -147,7 +278,12 @@ void OutputDialog::reject()
  */
 void OutputDialog::onPencertange(int percentage)
 {
-  if (percentage > 0 && !m_progressBar->isVisible()) m_progressBar->show();
+  if (percentage > 0 && !m_progressBar->isVisible())
+  {
+    m_progressBar->show();
+    if (SettingsManager::getShowStopTransaction()) m_toolButtonStopTransaction->show();
+  }
+
   m_progressBar->setValue(percentage);
 }
 
@@ -194,6 +330,7 @@ bool OutputDialog::textInTabOutput(const QString& findText)
 void OutputDialog::pacmanProcessFinished(int exitCode, QProcess::ExitStatus exitStatus)
 {
   m_progressBar->close();
+  if (SettingsManager::getShowStopTransaction()) m_toolButtonStopTransaction->close();
 
   if ((exitCode == 0) && exitStatus == QProcess::NormalExit)
   {
@@ -212,13 +349,30 @@ void OutputDialog::pacmanProcessFinished(int exitCode, QProcess::ExitStatus exit
 
     if (res == QMessageBox::Yes)
     {
-      m_pacmanExec->runLastestCommandInTerminal();
+      m_pacmanExec->runLatestCommandInTerminal();
       return;
     }
   }
 
   delete m_pacmanExec;
   m_upgradeRunning = false;
+}
+
+/*
+ * Whenever PacmanExec says we can show/close the stop transaction toolbutton...
+ */
+void OutputDialog::onCanStopTransaction(bool yesNo)
+{
+  if (yesNo == true && m_progressBar->isHidden()) return;
+  if (SettingsManager::getShowStopTransaction()) m_toolButtonStopTransaction->setVisible(yesNo);
+}
+
+/*
+ * Kills all pacman processes
+ */
+void OutputDialog::stopTransaction()
+{
+  m_pacmanExec->cancelProcess();
 }
 
 /*
@@ -265,8 +419,8 @@ void OutputDialog::closeEvent(QCloseEvent *event)
   }
   else
   {
-    emit finished(0);
     event->accept();
+    emit finished(0);
   }
 }
 
